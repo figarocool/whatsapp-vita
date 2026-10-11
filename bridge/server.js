@@ -365,7 +365,7 @@ function convertForVita(jid, id) {
   const pr = (async () => {
     const m = raws.get(jid)?.get(id); if (!m) throw new Error('messaggio non trovato');
     const src = path.join(VIDEO_DIR, key + '.src'); fs.writeFileSync(src, await download(m)); const tmp = path.join(VIDEO_DIR, key + '.tmp.mp4'); const t0 = Date.now();
-    await new Promise((resolve, reject) => require('child_process').execFile('ffmpeg', ['-y', '-i', src, '-vf', "scale=w='min(720,iw)':h='min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p", '-c:v', 'libx264', '-profile:v', 'main', '-level', '3.1', '-preset', 'veryfast', '-crf', '26', '-maxrate', '2500k', '-bufsize', '5000k', '-r', '30', '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp], { timeout: 300000 }, (e, so, se) => e ? reject(new Error('ffmpeg: ' + String(se || '').slice(-200))) : resolve()));
+    await new Promise((resolve, reject) => require('child_process').execFile('ffmpeg', ['-y', '-i', src, '-vf', "scale=w='min(720,iw)':h='min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p", '-c:v', 'libx264', '-profile:v', 'main', '-level', '3.1', '-preset', 'veryfast', '-bf', '0', '-refs', '2', '-g', '60', '-crf', '26', '-maxrate', '2500k', '-bufsize', '5000k', '-r', '30', '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp], { timeout: 300000 }, (e, so, se) => e ? reject(new Error('ffmpeg: ' + String(se || '').slice(-200))) : resolve()));
     fs.renameSync(tmp, out); try { fs.unlinkSync(src); } catch (_) {} log('video convertito per la Vita in', Date.now() - t0, 'ms:', fs.statSync(out).size, 'byte'); return out;
   })().finally(() => { converting.delete(key); try { fs.unlinkSync(path.join(VIDEO_DIR, key + '.src')); fs.unlinkSync(path.join(VIDEO_DIR, key + '.tmp.mp4')); } catch (_) {} });
   converting.set(key, pr); return pr;
@@ -389,7 +389,7 @@ function runFfmpeg(args, durSec, onPct, bg, holder) {
   });
 }
 function prepStart(jid, id, kind, bg) {
-  const key = sha1hex(jid + '|' + id + '|' + kind + '|r3'), old = preps.get(key);
+  const key = sha1hex(jid + '|' + id + '|' + kind + '|r4'), old = preps.get(key);
   // se l'utente chiede un file che sta convertendo in background a bassa priorita', si ferma e si rifa' a priorita' normale
   if (old && old.bg && !bg) {
     old.bg = false;   // da ora ha la priorita' dell'utente
@@ -423,7 +423,7 @@ function prepStart(jid, id, kind, bg) {
 // Video in arrivo (storie e chat): si convertono in background, uno alla volta, cosi' sulla Vita sono gia' pronti.
 const bgQueue = []; let bgBusy = false;
 function bgPrep(jid, id) {
-  const key = sha1hex(jid + '|' + id + '|video|r3'); const x = preps.get(key);
+  const key = sha1hex(jid + '|' + id + '|video|r4'); const x = preps.get(key);
   if ((x && x.state !== 'error') || bgQueue.some((t) => t[2] === key)) return;
   if (fs.existsSync(path.join(VIDEO_DIR, key + '.mp4'))) return;
   bgQueue.push([jid, id, key]); bgNext();

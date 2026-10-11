@@ -14,7 +14,8 @@
 static SceAvPlayerHandle h; static int open_ok, running, audio_port = -1, audio_thr_on;
 static pthread_t audio_thr; static vita2d_texture *tex; static unsigned tex_w, tex_h;
 
-static void *a_alloc(void *arg, uint32_t al, uint32_t sz) { (void)arg; return memalign(al < 16 ? 16 : al, sz); }
+static unsigned ga_n, ga_fail; static unsigned long long ga_bytes;
+static void *a_alloc(void *arg, uint32_t al, uint32_t sz) { (void)arg; void *p = memalign(al < 16 ? 16 : al, sz); if (p) { ga_n++; ga_bytes += sz; } else ga_fail++; return p; }
 static void a_free(void *arg, void *p) { (void)arg; free(p); }
 // i fotogrammi li scrive il decodificatore hardware: serve memoria CDRAM visibile al GPU (come negli esempi di SceAvPlayer)
 static unsigned alloc_fail, alloc_ok, alloc_last_fail;
@@ -57,7 +58,7 @@ int player_open(const char *path, int loop) {
   sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
   SceAvPlayerInitData d; memset(&d, 0, sizeof d);
   d.memoryReplacement.allocate = a_alloc; d.memoryReplacement.deallocate = a_free; d.memoryReplacement.allocateTexture = t_alloc; d.memoryReplacement.deallocateTexture = t_free;
-  d.basePriority = 0xA0; d.numOutputVideoFrameBuffers = 3; d.autoStart = 1; d.debugLevel = 0;
+  d.basePriority = 0xA0; d.numOutputVideoFrameBuffers = 5; d.autoStart = 1; d.debugLevel = 0;
   h = sceAvPlayerInit(&d); if (!h || ((unsigned)h >> 16) == 0x806A) { int er = (int)h; h = 0; return er ? er : -1; }   // l'handle e' un puntatore (anche con il bit alto acceso): errori solo 0 e 0x806Axxxx
   int ar = sceAvPlayerAddSource(h, path); if (ar < 0) { sceAvPlayerClose(h); h = 0; return ar; }
   sceAvPlayerSetLooping(h, loop ? 1 : 0);
@@ -102,4 +103,4 @@ int player_ended(void) {
 }
 void player_size(unsigned *w, unsigned *h2) { *w = tex_w; *h2 = tex_h; }
 void player_audio_diag(char *out, int n) { snprintf(out, n, "audio: frames=%u ch=%d rate=%d size=%d grain=%d porta=%d", a_frames, a_ch, a_rate, a_size, a_grain, a_open_rc); }
-void player_video_diag(char *out, int n) { snprintf(out, n, "memoria fotogrammi: ok=%u fallite=%u (ultima %u byte) attivo=%d", alloc_ok, alloc_fail, alloc_last_fail, open_ok ? sceAvPlayerIsActive(h) : -1); }
+void player_video_diag(char *out, int n) { snprintf(out, n, "memoria fotogrammi: ok=%u fallite=%u (ultima %u byte); heap lettore: %u blocchi, %u falliti, %llu KB; attivo=%d", alloc_ok, alloc_fail, alloc_last_fail, ga_n, ga_fail, ga_bytes / 1024, open_ok ? sceAvPlayerIsActive(h) : -1); }

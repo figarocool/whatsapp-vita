@@ -149,7 +149,6 @@ static char toast_txt[160]; static int toast_new;
 static volatile int quit_flag, poll_now;
 static int sync_active, sync_pct, sync_chats; static unsigned sync_t0;
 static volatile int scan_pct = -1;
-static unsigned long long last_tap_ms; static int last_tap_id, last_tap_x, last_tap_y;
 static int list_sel, nav_mode, list_sel_dirty, dpad_hold;   // selezione con i tasti direzionali nella lista chat
 static volatile int quit_req;
 static volatile int chat_limit = 40, msg_limit = 30;   // caricamento a blocchi
@@ -777,7 +776,7 @@ static Media *media_get(const char *jid, const char *id) {
 // ======================================================================
 // modelli UI
 // ======================================================================
-typedef struct { char jid[160]; char name[96]; char last[160]; long ts; int unread; int group; int archived, muted, blocked, channel; } Chat;
+typedef struct { char jid[160]; char name[96]; char last[160]; long ts; int unread; int group; int archived, muted, blocked, channel, pinned; } Chat;
 static Chat chats[400]; static int nchats;
 enum { K_TEXT, K_IMAGE, K_VIDEO, K_AUDIO, K_VOICE, K_DOC, K_STICKER, K_DELETED };
 typedef struct {
@@ -846,7 +845,7 @@ static void apply_pending(void) {
         ch->ts = (long)json_num(o, "ts", 0); ch->unread = (int)json_num(o, "unread", 0);
         ch->group = strstr(ch->jid, "@g.us") != NULL;
         ch->channel = strstr(ch->jid, "@newsletter") != NULL;
-        ch->archived = json_bool(o, "archived", 0); ch->muted = (int)json_num(o, "muted", 0); ch->blocked = json_bool(o, "blocked", 0);
+        ch->archived = json_bool(o, "archived", 0); ch->muted = (int)json_num(o, "muted", 0); ch->blocked = json_bool(o, "blocked", 0); ch->pinned = json_bool(o, "pinned", 0);
       }
     }
     json_free(c); pthread_mutex_lock(&mu);
@@ -984,7 +983,7 @@ static void layout_msg(Msg *m, int maxbw, int showname) {
 // ======================================================================
 // pulsanti dichiarati durante il disegno e risolti a fine frame
 // ======================================================================
-enum { B_NONE, B_ROW, B_CHIP, B_PROFILE, B_BACK, B_MSG, B_EMOJI_BTN, B_SEND, B_ATTACH, B_DRAFT, B_EMO_CELL, B_EMO_BACK, B_EMO_CLOSE, B_MENU_REACT, B_MENU_ITEM, B_MENU_CLOSE, B_VIEW_CLOSE, B_PICK_ENTRY, B_PICK_UP, B_PREVIEW_SEND, B_PREVIEW_CAPTION, B_PREVIEW_CANCEL, B_PROF_NAME, B_PROF_ABOUT, B_PROF_PHOTO, B_CANCEL_REPLY, B_TAB, B_FAB, B_SEARCH_ICON, B_LISTMENU, B_CHATMENU, B_HEADER_INFO, B_POPUP_ITEM, B_POPUP_CLOSE, B_UNBLOCK_BAR, B_SEARCH_BOX, B_SEARCH_ROW, B_NC_GROUP, B_NC_CONTACT, B_NC_ROW, B_GR_SUBJECT, B_GR_ROW, B_GR_CREATE, B_CT_BLOCK, B_MEDIA_TAB, B_MEDIA_ITEM, B_DOC_ITEM, B_UPD_ROW, B_COMM_ROW, B_ST_PREV, B_ST_NEXT, B_LOGOUT, B_PLUGIN, B_PLUGIN_RM, B_BRIDGE_ADDR, B_THEME_UI, B_UPD_MY, B_STORY_NEW, B_FOLLOW_CH, B_ST_VIEWERS, B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT, B_NOTIF_TEST, B_PLUGIN_DIAG , B_CAM_OPEN, B_CAM_SHOT, B_CAM_FLIP, B_COMM_NEW, B_COMM_HEAD, B_UPD_CHECK, B_UPD_CANCEL, B_UPD_BLOCK, B_LANG, B_LANG_ROW, B_XFER_CANCEL, B_ST_SAVE, B_CALL_ROW, B_ABOUT};
+enum { B_NONE, B_ROW, B_CHIP, B_PROFILE, B_BACK, B_MSG, B_EMOJI_BTN, B_SEND, B_ATTACH, B_DRAFT, B_EMO_CELL, B_EMO_BACK, B_EMO_CLOSE, B_MENU_REACT, B_MENU_ITEM, B_MENU_CLOSE, B_VIEW_CLOSE, B_PICK_ENTRY, B_PICK_UP, B_PREVIEW_SEND, B_PREVIEW_CAPTION, B_PREVIEW_CANCEL, B_PROF_NAME, B_PROF_ABOUT, B_PROF_PHOTO, B_CANCEL_REPLY, B_TAB, B_FAB, B_SEARCH_ICON, B_LISTMENU, B_CHATMENU, B_HEADER_INFO, B_POPUP_ITEM, B_POPUP_CLOSE, B_UNBLOCK_BAR, B_SEARCH_BOX, B_SEARCH_ROW, B_NC_GROUP, B_NC_CONTACT, B_NC_ROW, B_GR_SUBJECT, B_GR_ROW, B_GR_CREATE, B_CT_BLOCK, B_MEDIA_TAB, B_MEDIA_ITEM, B_DOC_ITEM, B_UPD_ROW, B_COMM_ROW, B_ST_PREV, B_ST_NEXT, B_LOGOUT, B_PLUGIN, B_PLUGIN_RM, B_BRIDGE_ADDR, B_THEME_UI, B_UPD_MY, B_STORY_NEW, B_FOLLOW_CH, B_ST_VIEWERS, B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT, B_NOTIF_TEST, B_PLUGIN_DIAG , B_CAM_OPEN, B_CAM_SHOT, B_CAM_FLIP, B_COMM_NEW, B_COMM_HEAD, B_UPD_CHECK, B_UPD_CANCEL, B_UPD_BLOCK, B_LANG, B_LANG_ROW, B_XFER_CANCEL, B_ST_SAVE, B_CALL_ROW, B_ABOUT, B_SEL_CANCEL, B_SEL_PIN, B_SEL_MUTE, B_SEL_ARCH, B_SEL_DEL};
 typedef struct { int x, y, w, h, id, arg; } Btn;
 static Btn btns[400]; static int nb; static int clip_y0 = 0, clip_y1 = 100000;
 static void btn(int x, int y, int w, int h, int id, int arg) {
@@ -1149,6 +1148,12 @@ static void close_chat(void) {
 
 #define ROWH 72
 static int visible_idx[400]; static int nvis; static int show_archived;
+// selezione di piu' chat nella lista (pressione lunga): in alto compaiono le azioni (fissa, silenzia, archivia, elimina)
+#define MAXSEL 8
+static char selj[MAXSEL][160]; static int nsel;
+static int sel_find(const char *jid) { for (int i = 0; i < nsel; i++) if (!strcmp(selj[i], jid)) return i; return -1; }
+static void sel_toggle(const char *jid) { int i = sel_find(jid); if (i >= 0) { memmove(selj[i], selj[i + 1], (size_t)(nsel - i - 1) * sizeof selj[0]); nsel--; } else if (nsel < MAXSEL) snprintf(selj[nsel++], sizeof selj[0], "%s", jid); }
+static Chat *sel_chat(int i);
 static void build_visible(void) {
   nvis = 0;
   for (int i = 0; i < nchats; i++) {
@@ -1241,6 +1246,8 @@ int main(void) {
     sceCtrlPeekBufferPositive(0, &pad, 1);
     unsigned pressed = pad.buttons & ~oldpad.buttons; oldpad = pad;
     if (upd_busy()) pressed = 0;
+    if (nsel > 0 && screen == S_LIST && !popup_open && (pressed & SCE_CTRL_CIRCLE)) { nsel = 0; pressed &= ~SCE_CTRL_CIRCLE; }   // Cerchio annulla la selezione
+    if (screen != S_LIST) nsel = 0;
     if (xfer.active) { if (pressed & SCE_CTRL_CIRCLE) xfer.cancel = 1; pressed = 0; }   // durante un trasferimento: Cerchio annulla, il resto e' bloccato   // l'aggiornamento e' obbligatorio e non si interrompe: durante l'installazione non si tocca altro
     SceTouchData td; sceTouchPeek(SCE_TOUCH_PORT_FRONT, &td, 1);
     int tap = 0, lp = 0; float tapx = 0, tapy = 0;
@@ -1329,7 +1336,9 @@ int main(void) {
         if (y + ROWH < HDR + CHIPS || y > SH) continue;
         Chat *c = &chats[visible_idx[v]];
         if (nav_mode && v == list_sel) { vita2d_draw_rectangle(0, y, SW, ROWH, RGBA8(0x2B, 0x7B, 0xFF, 64)); vita2d_draw_rectangle(0, y, 6, ROWH, RGBA8(0x2B, 0x7B, 0xFF, 255)); }   // riga selezionata: azzurro trasparente
+        if (sel_find(c->jid) >= 0) vita2d_draw_rectangle(0, y, SW, ROWH, RGBA8(0x2B, 0x7B, 0xFF, 70));
         draw_avatar(c->jid, c->name, 44, y + ROWH / 2, 26);
+        if (sel_find(c->jid) >= 0) { vita2d_draw_fill_circle(66, y + ROWH / 2 + 20, 11, C_BG); vita2d_draw_fill_circle(66, y + ROWH / 2 + 20, 9, C_GREEN2); tline(61, y + ROWH / 2 + 20, 65, y + ROWH / 2 + 24, C_WHITE); tline(65, y + ROWH / 2 + 24, 72, y + ROWH / 2 + 15, C_WHITE); }
         char nm[200]; fit(c->name, SW - 88 - 84, 20, nm, sizeof nm); text(88, (int)y + 10, C_TEXT, 20, nm);
         char ls[300]; fit(c->last, SW - 88 - 70, 16, ls, sizeof ls); text(88, (int)y + 38, C_SUB, 16, ls);
         char tm[16] = ""; if (c->ts) fmt_time(c->ts, tm, sizeof tm, 1);
@@ -1339,15 +1348,18 @@ int main(void) {
           int uw = tw(13, u) + 14; if (uw < 24) uw = 24;
           rrect(SW - 16 - uw, y + 40, uw, 24, 12, C_GREEN2); text(SW - 16 - uw + (uw - tw(13, u)) / 2, (int)y + 44, C_BG, 13, u);
         }
+        if (c->pinned) { int px = SW - 28 - (c->unread > 0 ? 36 : 0); float py = y + 52; vita2d_draw_fill_circle(px, py - 4, 5, C_SUB); vita2d_draw_rectangle(px - 1, py, 2, 8, C_SUB); vita2d_draw_rectangle(px - 6, py - 2, 12, 2, C_SUB); }   // puntina: chat fissata
         btn(0, (int)y, SW, ROWH, B_ROW, visible_idx[v]);
       }
       vita2d_disable_clipping(); clip_y0 = 0; clip_y1 = SH;
       CHROME_BEGIN();
       vita2d_draw_rectangle(0, 0, SW, HDR, C_BG);
+      if (nsel == 0) {
       textb(20, 14, C_GREEN2, 30, show_archived ? T("Archiviate") : "WhatsApp");
       draw_avatar(prof.jid[0] ? prof.jid : "me", prof.name, SW - 40, 30, 20); btn(SW - 70, 0, 70, HDR, B_PROFILE, 0);
       vita2d_draw_fill_circle(SW - 168, 28, 9, C_TEXT); vita2d_draw_fill_circle(SW - 168, 28, 7, C_BG); tline(SW - 162, 34, SW - 154, 42, C_TEXT); btn(SW - 195, 0, 55, HDR, B_SEARCH_ICON, 0);
       for (int d = 0; d < 3; d++) vita2d_draw_fill_circle(SW - 110, 20 + d * 10, 2.5f, C_TEXT); btn(SW - 135, 0, 55, HDR, B_LISTMENU, 0);
+      } else draw_sel_bar();
       vita2d_draw_rectangle(0, HDR, SW, CHIPS, C_BG);
       const char *chn[] = { T("Tutte"), T("Non lette"), T("Gruppi") }; int cx = 16;
       for (int i = 0; i < 3; i++) {
@@ -1631,17 +1643,12 @@ int main(void) {
     // ---- risoluzione input ----
     Btn *hit = (tap || lp) ? btn_at(tapx, tapy) : NULL;
     int id = hit ? hit->id : B_NONE, arg = hit ? hit->arg : 0;
-    if (tap || lp) { crumb("%s id=%d arg=%d schermata=%d x=%d y=%d", lp ? "pressione lunga" : "tocco", id, arg, screen, (int)tapx, (int)tapy); last_tap_ms = sceKernelGetProcessTimeWide() / 1000; last_tap_id = id; last_tap_x = (int)tapx; last_tap_y = (int)tapy; }
-    {   // diagnostica: se l'app viene messa in background (o il sistema la blocca) il tempo fra due fotogrammi salta
-      static unsigned long long prev_us; unsigned long long now_us = sceKernelGetProcessTimeWide();
-      if (prev_us && now_us - prev_us > 1500000ULL) crumb("PAUSA di %llu ms fra due fotogrammi (app in background o bloccata); ultimo tocco %llu ms prima: id=%d x=%d y=%d schermata=%d", (now_us - prev_us) / 1000, now_us / 1000 - last_tap_ms, last_tap_id, last_tap_x, last_tap_y, screen);
-      prev_us = now_us;
-      static int td_prev; int td_now = td.reportNum > 0; if (td_now && !td_prev && td.report[0].x / 2 > 860 && td.report[0].y / 2 < 70) crumb("contatto in alto a destra x=%d y=%d schermata=%d", td.report[0].x / 2, td.report[0].y / 2, screen); td_prev = td_now;
-    }
+    if (tap || lp) { crumb("%s id=%d arg=%d schermata=%d", lp ? "pressione lunga" : "tocco", id, arg, screen); }
     if (lp) {
+      if (id == B_ROW && screen == S_LIST && arg >= 0 && arg < nchats && !popup_open) sel_toggle(chats[arg].jid);   // pressione lunga su una chat: la seleziona
       if (id == B_MSG && arg < 1000 && arg < nmsgs && !menu_open && !viewer_open && !(cur_chat >= 0 && cur_chat < nchats && chats[cur_chat].channel)) { menu_open = 1; snprintf(menu_id, sizeof menu_id, "%s", msgs[arg].id); }
     } else if (tap) switch (id) {
-      case B_ROW: open_chat(arg); break;
+      case B_ROW: if (nsel > 0 && arg >= 0 && arg < nchats) sel_toggle(chats[arg].jid); else open_chat(arg); break;
       case B_CHIP: filter_sel = arg; list_scroll = 0; break;
       case B_PROFILE: screen = S_PROFILE; break;
       case B_BACK: if (extra_back()) break; if (screen == S_CHAT) close_chat(); else if (screen == S_PROFILE) screen = S_LIST; else if (screen == S_PICKER) { if (pick_dir[0]) pick_up(); else screen = (pick_mode == 1 ? S_PROFILE : pick_mode == 2 ? S_UPDATES : S_CHAT); } break;
@@ -1699,7 +1706,8 @@ int main(void) {
       }
       int ch_ro = screen == S_CHAT && cur_chat >= 0 && cur_chat < nchats && chats[cur_chat].channel;
       if ((pressed & SCE_CTRL_CROSS) && screen == S_CHAT && !ch_ro && !menu_open && !viewer_open) ime_open(IME_DRAFT, T("Scrivi un messaggio"), draft);
-      if ((pressed & SCE_CTRL_CROSS) && screen == S_LIST && !popup_open && !menu_open) { if (nav_mode && nvis > 0 && list_sel < nvis) open_chat(visible_idx[list_sel]); else { nav_mode = 1; list_sel_dirty = 1; } }
+      if ((pressed & SCE_CTRL_CROSS) && screen == S_LIST && !popup_open && !menu_open) { if (nav_mode && nvis > 0 && list_sel < nvis) { if (nsel > 0) sel_toggle(chats[visible_idx[list_sel]].jid); else open_chat(visible_idx[list_sel]); } else { nav_mode = 1; list_sel_dirty = 1; } }
+      if ((pressed & SCE_CTRL_SQUARE) && screen == S_LIST && nav_mode && nvis > 0 && list_sel < nvis && !popup_open && !menu_open) sel_toggle(chats[visible_idx[list_sel]].jid);   // Quadrato: seleziona la chat evidenziata
       if ((pressed & SCE_CTRL_CROSS) && (screen == S_UPDATES || screen == S_COMM || screen == S_CALLS) && !popup_open && !menu_open && !viewer_open) {
         if (tnav && tsel < nsr) { int sid = srows[tsel].id, sarg = srows[tsel].arg; if (sid == B_ROW) open_chat(sarg); else handle_extra(sid, sarg); } else { tnav = 1; tsel_dirty = 1; }
       }

@@ -9,6 +9,7 @@ static float misc_scroll, misc_vel;
 static void query2(const char *tag, const char *path); static unsigned my_q_frame; static jv *qres2_arr(const char *tag);
 static char view_jid[160]; static int view_is_video;
 static void vp_want(const char *jid, const char *id); static int vp_draw(float x, float y, float w, float h);
+static void sel_chatmod(const char *more, const char *toast);
 static int st_img_view;   // 1 mentre si guarda un'immagine di una storia (abilita pizzico e trascinamento)
 static char search_q[120], search_scope[160]; static int search_from = S_LIST;
 static char nc_number[40]; static int nc_check; static char open_after[160]; static int open_after_t;
@@ -413,7 +414,7 @@ static void draw_viewer(void) {
   text(SW / 2 - 130, 14, RGBA8(200, 200, 200, 255), 15, T("Tocca fuori dai pulsanti o premi Cerchio per chiudere"));
 }
 
-enum { A_CLOSE = 1, A_NEW_GROUP, A_VIEW_CONTACT, A_SEARCH, A_MEDIA, A_MUTE_MENU, A_MUTE_8H, A_MUTE_1W, A_MUTE_ALWAYS, A_UNMUTE, A_DIS_MENU, A_DIS_OFF, A_DIS_24H, A_DIS_7D, A_DIS_90D, A_THEME_MENU, A_MORE, A_BLOCK, A_UNBLOCK, A_CLEAR, A_DELETE, A_EXPORT, A_ARCHIVE, A_DO_BLOCK, A_DO_CLEAR, A_DO_DELETE, A_LIST_ARCHIVED, A_LIST_PROFILE, A_LOGOUT, A_DO_LOGOUT, A_QUIT, A_INSTALL_PROBES, A_TOGGLE_SCALE, A_ABOUT_CUSTOM, A_REACT_VIEW, A_TOGGLE_UI, A_STORY_TEXT, A_STORY_PHOTO, A_TOGGLE_RECEIPTS, A_UNFOLLOW, A_DO_UNFOLLOW, A_INSTALL_PLUGIN, A_DECLINE_PLUGIN, A_REBOOT, A_TOGGLE_NOTIF, A_UNINSTALL_PLUGIN, A_DO_UNINSTALL, A_COMM_GROUP, A_COMM_RENAME, A_COMM_DESC, A_COMM_LEAVE, A_DO_COMM_LEAVE, A_UPD_NOW, A_UPD_LATER, A_UPD_ERR, A_UPD_RETRY, A_THEME_BASE = 100, A_STORY_COL_BASE = 200, A_ABOUT_BASE = 300, A_REACT_BASE = 400 };
+enum { A_CLOSE = 1, A_NEW_GROUP, A_VIEW_CONTACT, A_SEARCH, A_MEDIA, A_MUTE_MENU, A_MUTE_8H, A_MUTE_1W, A_MUTE_ALWAYS, A_UNMUTE, A_DIS_MENU, A_DIS_OFF, A_DIS_24H, A_DIS_7D, A_DIS_90D, A_THEME_MENU, A_MORE, A_BLOCK, A_UNBLOCK, A_CLEAR, A_DELETE, A_EXPORT, A_ARCHIVE, A_DO_BLOCK, A_DO_CLEAR, A_DO_DELETE, A_LIST_ARCHIVED, A_LIST_PROFILE, A_LOGOUT, A_DO_LOGOUT, A_QUIT, A_INSTALL_PROBES, A_TOGGLE_SCALE, A_ABOUT_CUSTOM, A_REACT_VIEW, A_TOGGLE_UI, A_STORY_TEXT, A_STORY_PHOTO, A_TOGGLE_RECEIPTS, A_UNFOLLOW, A_DO_UNFOLLOW, A_INSTALL_PLUGIN, A_DECLINE_PLUGIN, A_REBOOT, A_TOGGLE_NOTIF, A_UNINSTALL_PLUGIN, A_DO_UNINSTALL, A_COMM_GROUP, A_COMM_RENAME, A_COMM_DESC, A_COMM_LEAVE, A_DO_COMM_LEAVE, A_UPD_NOW, A_UPD_LATER, A_UPD_ERR, A_UPD_RETRY, A_SEL_MUTE_8H, A_SEL_MUTE_1W, A_SEL_MUTE_ALWAYS, A_SEL_DO_DELETE, A_THEME_BASE = 100, A_STORY_COL_BASE = 200, A_ABOUT_BASE = 300, A_REACT_BASE = 400 };
 static void popup_begin(const char *title); static void popup_add(const char *label, int act, int red);
 // ---------- installazione plugin notifiche (taiHEN) ----------
 #define PLUGIN_LINE "ur0:tai/wa_notify.suprx"
@@ -564,6 +565,8 @@ static void popup_act(int act) {
     case A_MUTE_MENU: popup_begin(T("Silenzia notifiche")); popup_add(T("8 ore"), A_MUTE_8H, 0); popup_add(T("1 settimana"), A_MUTE_1W, 0); popup_add(T("Sempre"), A_MUTE_ALWAYS, 0); break;
     case A_MUTE_8H: case A_MUTE_1W: case A_MUTE_ALWAYS: case A_UNMUTE:
       if (c) { long long ms = act == A_MUTE_8H ? 28800000LL : act == A_MUTE_1W ? 604800000LL : act == A_MUTE_ALWAYS ? 3153600000000LL : 0; snprintf(more, sizeof more, ",\"action\":\"mute\",\"until\":%lld", ms); fire_jid("/chatmod", c->jid, more, act == A_UNMUTE ? T("Notifiche riattivate") : T("Chat silenziata")); c->muted = act != A_UNMUTE; } break;
+    case A_SEL_MUTE_8H: case A_SEL_MUTE_1W: case A_SEL_MUTE_ALWAYS: { long long ms = act == A_SEL_MUTE_8H ? 28800000LL : act == A_SEL_MUTE_1W ? 604800000LL : 3153600000000LL; snprintf(more, sizeof more, ",\"action\":\"mute\",\"until\":%lld", ms); sel_chatmod(more, T("Fatto")); for (int i = 0; i < nsel; i++) { Chat *sc = sel_chat(i); if (sc) sc->muted = 1; } nsel = 0; break; }
+    case A_SEL_DO_DELETE: sel_chatmod(",\"action\":\"delete\"", T("Fatto")); nsel = 0; break;
     case A_DIS_MENU: popup_begin(T("Messaggi effimeri")); popup_add(T("Disattivati"), A_DIS_OFF, 0); popup_add(T("24 ore"), A_DIS_24H, 0); popup_add(T("7 giorni"), A_DIS_7D, 0); popup_add(T("90 giorni"), A_DIS_90D, 0); break;
     case A_DIS_OFF: case A_DIS_24H: case A_DIS_7D: case A_DIS_90D:
       if (c) { int sec = act == A_DIS_24H ? 86400 : act == A_DIS_7D ? 604800 : act == A_DIS_90D ? 7776000 : 0; snprintf(more, sizeof more, ",\"seconds\":%d", sec); fire_jid("/disappear", c->jid, more, T("Messaggi effimeri aggiornati")); } break;
@@ -776,6 +779,19 @@ static void draw_lang(void) {
 }
 
 
+// ---------- selezione chat: barra azioni ----------
+static Chat *sel_chat(int i) { if (i < 0 || i >= nsel) return NULL; for (int k = 0; k < nchats; k++) if (!strcmp(chats[k].jid, selj[i])) return &chats[k]; return NULL; }
+static void draw_sel_bar(void) {
+  vita2d_draw_rectangle(0, 0, SW, HDR, C_BAR);
+  tline(24, 22, 44, 42, C_TEXT); tline(44, 22, 24, 42, C_TEXT); btn(0, 0, 70, HDR, B_SEL_CANCEL, 0);
+  char cnt[64]; snprintf(cnt, sizeof cnt, T("%d selezionate"), nsel); textb(70, 18, C_TEXT, 22, cnt);
+  int allpin = 1, allmute = 1; for (int i = 0; i < nsel; i++) { Chat *c = sel_chat(i); if (c) { if (!c->pinned) allpin = 0; if (!c->muted) allmute = 0; } }
+  const char *lab[4] = { allpin ? T("Stacca") : T("Fissa"), allmute ? T("Riattiva") : T("Silenzia"), show_archived ? T("Ripristina") : T("Archivia"), T("Elimina") }; int ids[4] = { B_SEL_PIN, B_SEL_MUTE, B_SEL_ARCH, B_SEL_DEL };
+  int x = SW - 14;
+  for (int i = 3; i >= 0; i--) { int w = tw(17, lab[i]) + 34; x -= w; rrect(x, (HDR - 40) / 2, w, 40, 20, i == 3 ? RGBA8(0xE5, 0x39, 0x35, 255) : C_BG); text(x + 17, (HDR - 40) / 2 + 10, i == 3 ? C_WHITE : C_TEXT, 17, lab[i]); btn(x, (HDR - 40) / 2, w, 40, ids[i], 0); x -= 8; }
+}
+static void sel_chatmod(const char *more, const char *toast) { for (int i = 0; i < nsel; i++) fire_jid("/chatmod", selj[i], more, i == nsel - 1 ? toast : ""); }
+
 // ---------- storie: avanti e indietro (tocco, L1/R1, croce) ----------
 static void st_step(int dir) {
   if (vz > 1.01f || vz < 0.99f) { vz = 1; vpx = vpy = 0; return; }   // con zoom, il tocco riporta prima alla misura intera
@@ -907,6 +923,15 @@ static int extra_back(void) {
 static void handle_extra(int id, int arg) {
   switch (id) {
     case B_TAB: goto_tab(arg); break;
+    case B_SEL_CANCEL: nsel = 0; break;
+    case B_SEL_PIN: { int allpin = 1; for (int i = 0; i < nsel; i++) { Chat *c = sel_chat(i); if (c && !c->pinned) allpin = 0; }
+      sel_chatmod(allpin ? ",\"action\":\"unpin\"" : ",\"action\":\"pin\"", T("Fatto")); for (int i = 0; i < nsel; i++) { Chat *c = sel_chat(i); if (c) c->pinned = !allpin; } nsel = 0; break; }
+    case B_SEL_MUTE: { int allmute = 1; for (int i = 0; i < nsel; i++) { Chat *c = sel_chat(i); if (c && !c->muted) allmute = 0; }
+      if (allmute) { sel_chatmod(",\"action\":\"mute\",\"until\":0", T("Fatto")); for (int i = 0; i < nsel; i++) { Chat *c = sel_chat(i); if (c) c->muted = 0; } nsel = 0; }
+      else { popup_begin(T("Silenzia notifiche")); popup_add(T("8 ore"), A_SEL_MUTE_8H, 0); popup_add(T("1 settimana"), A_SEL_MUTE_1W, 0); popup_add(T("Sempre"), A_SEL_MUTE_ALWAYS, 0); }
+      break; }
+    case B_SEL_ARCH: sel_chatmod(show_archived ? ",\"action\":\"unarchive\"" : ",\"action\":\"archive\"", show_archived ? T("Rimossa dall'archivio") : T("Chat archiviata")); for (int i = 0; i < nsel; i++) { Chat *c = sel_chat(i); if (c) c->archived = !show_archived; } nsel = 0; break;
+    case B_SEL_DEL: popup_confirm(T("Eliminare le chat selezionate?"), T("Elimina"), A_SEL_DO_DELETE); break;
     case B_CALL_ROW: { jv *a = qarr("calls"); if (a && arg < a->count) open_by_jid(json_str(a->items[arg], "jid", "")); break; }
     case B_LOGOUT: popup_act(A_LOGOUT); break;
     case B_BRIDGE_ADDR: ime_open(IME_BRIDGE, T("Indirizzo bridge (es. http://192.168.1.59:8787)"), base_url); break;
@@ -1070,6 +1095,7 @@ static void extra_tick(void) {
         else if (k == 'y') { menu_open = 1; snprintf(menu_id, sizeof menu_id, "%s", msgs[nmsgs - 1].id); }
         else if (k == 'b') { snprintf(draft, sizeof draft, "Ciao, questo e' un messaggio di prova abbastanza lungo"); emoji_open = 1; } } }
     else if (dbg_key == 'p') { dbg_key = 0; screen = S_PROFILE; }
+    else if (dbg_key == 'k' && screen == S_LIST && nvis > 1 && frame_no > 400) { dbg_key = 0; sel_toggle(chats[visible_idx[0]].jid); sel_toggle(chats[visible_idx[1]].jid); chats[visible_idx[1]].pinned = 1; }
     else if (dbg_key == 'i') { dbg_key = 0; screen = S_ABOUT; misc_scroll = 0; }
     else if (dbg_key == 'l') { dbg_key = 0; screen = S_LANG; misc_scroll = 0; }
     else if (dbg_key == 'a') { dbg_key = 0; screen = S_PROFILE; popup_open_about(); }

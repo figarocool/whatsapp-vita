@@ -282,13 +282,13 @@ async function start() {
     for (const mp of lidPnMappings || []) link(mp.lid, mp.pn);
     for (const c of contacts || []) learnContact(c);
     dirtyMeta = true;
-    for (const c of cs || []) chats.set(c.id, { jid: c.id, name: c.name || nameFor(c.id) || c.id.split('@')[0], unread: c.unreadCount || 0, ts: num(c.conversationTimestamp) });
+    for (const c of cs || []) chats.set(c.id, { jid: c.id, name: c.name || nameFor(c.id) || c.id.split('@')[0], unread: c.unreadCount || 0, ts: num(c.conversationTimestamp), pinned: c.pinned ? num(c.pinned) : 0 });
     for (const m of ms || []) addMessage(m, false);
   });
   sock.ev.on('contacts.upsert', (cs) => { for (const c of cs) learnContact(c); });
   sock.ev.on('contacts.update', (cs) => { for (const c of cs) learnContact(c); });
   sock.ev.on('lid-mapping.update', ({ lid, pn }) => { link(lid, pn); dirtyMeta = true; });
-  sock.ev.on('chats.upsert', (cs) => { for (const c of cs) if (!chats.has(c.id)) chats.set(c.id, { jid: c.id, name: c.name || nameFor(c.id) || c.id.split('@')[0], unread: c.unreadCount || 0, ts: num(c.conversationTimestamp) }); });
+  sock.ev.on('chats.upsert', (cs) => { for (const c of cs) if (!chats.has(c.id)) chats.set(c.id, { jid: c.id, name: c.name || nameFor(c.id) || c.id.split('@')[0], unread: c.unreadCount || 0, ts: num(c.conversationTimestamp), pinned: c.pinned ? num(c.pinned) : 0 }); });
   sock.ev.on('messages.upsert', ({ messages: ms, type }) => {
     if (ms.length > 5) log('messages.upsert tipo=' + type + ' n=' + ms.length); for (const m of ms) addMessage(m, type === 'notify'); });
   sock.ev.on('messages.update', (ups) => {
@@ -308,7 +308,7 @@ async function start() {
   });
   setTimeout(() => { for (const j of chats.keys()) if (j.endsWith('@lid')) pendingLid.add(j); resolveLids(); }, 3000);
   sock.ev.on('chats.update', (ups) => {
-    for (const u of ups) { const c = chats.get(u.id); if (!c) continue; if ('archived' in u) c.archived = !!u.archived; if ('muteEndTime' in u) c.muted = u.muteEndTime ? num(u.muteEndTime) : 0; dirtyMeta = true; }
+    for (const u of ups) { const c = chats.get(u.id); if (!c) continue; if ('archived' in u) c.archived = !!u.archived; if ('muteEndTime' in u) c.muted = u.muteEndTime ? num(u.muteEndTime) : 0; if ('pinned' in u) c.pinned = u.pinned ? num(u.pinned) : 0; dirtyMeta = true; }
   });
   sock.ev.on('message-receipt.update', (ups) => {
     for (const { key, receipt } of ups) {
@@ -534,8 +534,8 @@ http.createServer(async (req, res) => {
     if (state.status !== 'open' && p !== '/events') return json(res, 503, { error: 'non connesso' });
 
     if (p === '/chats') {
-      const list = [...chats.values()].sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, Math.min(400, parseInt(q.get('limit') || '400', 10)))
-        .map((c) => ({ jid: c.jid, name: c.jid.endsWith('@newsletter') ? (chMetaFor(c.jid)?.name || (c.name && !/^\d+$/.test(c.name) ? c.name : 'Canale')) : nameOf(c.jid), channel: c.jid.endsWith('@newsletter'), last: c.last, ts: c.ts, unread: c.unread, archived: !!c.archived, muted: c.muted && c.muted > Date.now() ? 1 : 0, blocked: blocked.has(c.jid) }));
+      const list = [...chats.values()].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.ts || 0) - (a.ts || 0)).slice(0, Math.min(400, parseInt(q.get('limit') || '400', 10)))
+        .map((c) => ({ jid: c.jid, name: c.jid.endsWith('@newsletter') ? (chMetaFor(c.jid)?.name || (c.name && !/^\d+$/.test(c.name) ? c.name : 'Canale')) : nameOf(c.jid), channel: c.jid.endsWith('@newsletter'), last: c.last, ts: c.ts, unread: c.unread, archived: !!c.archived, pinned: c.pinned ? 1 : 0, muted: c.muted && c.muted > Date.now() ? 1 : 0, blocked: blocked.has(c.jid) }));
       return json(res, 200, list);
     }
     if (p.startsWith('/messages/') && arg('/messages/').endsWith('@newsletter')) {
@@ -690,6 +690,7 @@ http.createServer(async (req, res) => {
     if (p === '/chatmod' && req.method === 'POST') {
       const { jid, action, until } = await body();
       if (action === 'mute') { const t = until > 0 ? Date.now() + until : null; await sock.chatModify({ mute: t }, jid); const c = chats.get(jid); if (c) c.muted = t || 0; }
+      else if (action === 'pin' || action === 'unpin') { await sock.chatModify({ pin: action === 'pin' }, jid); const c = chats.get(jid); if (c) c.pinned = action === 'pin' ? Math.floor(Date.now() / 1000) : 0; }
       else if (action === 'archive' || action === 'unarchive') { await sock.chatModify({ archive: action === 'archive', lastMessages: lastMsgs(jid) }, jid); const c = chats.get(jid); if (c) c.archived = action === 'archive'; }
       else if (action === 'clear') { await sock.chatModify({ clear: true, lastMessages: lastMsgs(jid) }, jid); raws.get(jid)?.clear(); const c = chats.get(jid); if (c) c.last = ''; }
       else if (action === 'delete') { await sock.chatModify({ delete: true, lastMessages: lastMsgs(jid) }, jid); raws.delete(jid); chats.delete(jid); }

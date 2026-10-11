@@ -26,6 +26,7 @@ void upd_cleanup_helper(void);     // da chiamare PRIMA di aprire la grafica (ca
 void upd_check(int manual);        // controllo in un thread; manual=1 mostra anche "gia' aggiornato" e gli errori
 void upd_install(void);            // scarica, verifica, prepara e avvia l'installazione (thread)
 void upd_cancel(void);
+void upd_retry(void);              // riprova l'installazione dopo un errore
 void upd_snapshot(UpdInfo *out);
 int upd_busy(void);                // 1 mentre scarica/installa: l'interfaccia mostra la schermata di avanzamento
 void upd_dismiss(void);            // torna a IDLE (dopo errore/risultato mostrato)

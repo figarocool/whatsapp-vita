@@ -2,6 +2,8 @@
 // Chiude l'app, installa il pacchetto gia' estratto in ux0:/data/whatsapp/updates/core-install e riapre WhatsApp.
 // Schema ripreso da Desktop Mode (core_updater.c); la preparazione del pacchetto (head.bin) viene da VitaShell, GPL-3.0.
 #include <psp2/appmgr.h>
+#include <psp2/display.h>
+#include <psp2/kernel/sysmem.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <psp2/promoterutil.h>
@@ -53,8 +55,20 @@ static int promote_app(void) {
   sceSysmoduleUnloadModuleInternalWithArg(SCE_SYSMODULE_INTERNAL_PAF, 0, NULL, NULL);
   return res;
 }
+// Schermata fissa "Aggiornamento in corso" (immagine gia' pronta, scritta direttamente sul display: nessuna libreria grafica,
+// quindi nessun conflitto con i moduli di sistema che servono per installare). Senza, durante l'installazione lo schermo resta nero.
+static void show_screen(void) {
+  SceUID blk = sceKernelAllocMemBlock("wa_upd_fb", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 2 * 1024 * 1024, NULL); if (blk < 0) return;
+  void *base = NULL; if (sceKernelGetMemBlockBase(blk, &base) < 0 || !base) return;
+  int fd = sceIoOpen("app0:/assets/update-screen.raw", SCE_O_RDONLY, 0); if (fd < 0) return;
+  size_t total = 960 * 544 * 4, got = 0; while (got < total) { int n = sceIoRead(fd, (char *)base + got, total - got); if (n <= 0) break; got += (size_t)n; }
+  sceIoClose(fd); if (got < total) return;
+  SceDisplayFrameBuf fb; memset(&fb, 0, sizeof fb); fb.size = sizeof fb; fb.base = base; fb.pitch = 960; fb.pixelformat = SCE_DISPLAY_PIXELFORMAT_A8B8G8R8; fb.width = 960; fb.height = 544;
+  sceDisplaySetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME);
+}
 int main(void) {
   sceAppMgrDestroyOtherApp();
+  show_screen();
   int result = promote_app();
   if (result < 0) report_failure(result); else sceIoRemove(FAILURE_FILE);
   sceAppMgrLaunchAppByUri(0xFFFFF, "psgm:play?titleid=" TITLE_ID);

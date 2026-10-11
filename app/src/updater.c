@@ -137,7 +137,7 @@ static int http_fetch(const char *url, size_t (*wr)(char *, size_t, size_t, void
   curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, plain ? "http,https" : "https"); curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, plain ? "http,https" : "https");
   curl_easy_setopt(c, CURLOPT_SSLVERSION, (long)CURL_SSLVERSION_TLSv1_2);
   curl_easy_setopt(c, CURLOPT_CAINFO, "app0:/assets/cacert.pem"); curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 1L); curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 2L);
-  if (progress) { curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L); curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, xfer); curl_easy_setopt(c, CURLOPT_XFERINFODATA, NULL); }
+  if (progress) { curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1024L); curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 30L); curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L); curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, xfer); curl_easy_setopt(c, CURLOPT_XFERINFODATA, NULL); }
   CURLcode rc = curl_easy_perform(c); long st = 0; curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &st); if (status_out) *status_out = st;
   if (rc != CURLE_OK) utrace("curl: errore %d (%s) http=%ld", (int)rc, err, st); else if (st != 200) utrace("curl: http=%ld", st);
   curl_easy_cleanup(c); return rc == CURLE_OK && st == 200 ? 0 : (u_cancel ? -2 : -1);
@@ -158,7 +158,8 @@ static char m_digest[72]; static unsigned long long m_size;
 static int fetch_manifest(void) {
   static char buf[MANIFEST_LIMIT + 1]; Mem m = { buf, 0 }; buf[0] = 0; long st = 0;
   load_manifest_url(); utrace("controllo: %s (versione installata %s)", u_manifest_url, ui.current);
-  int rc = http_fetch(u_manifest_url, mem_write, &m, &st, 0); if (rc < 0 || !m.n) return rc == -2 ? -2 : -1;
+  char fresh[480]; snprintf(fresh, sizeof fresh, "%s%ct=%llu", u_manifest_url, strchr(u_manifest_url, '?') ? '&' : '?', (unsigned long long)sceKernelGetSystemTimeWide());   // GitHub tiene in cache l'alias 'latest' per qualche minuto
+  int rc = http_fetch(fresh, mem_write, &m, &st, 0); if (rc < 0 || !m.n) return rc == -2 ? -2 : -1;
   jv *j = json_parse(buf); if (!j) return -1;
   int ok = 0;
   if ((int)json_num(j, "schema", 0) == 1) {
@@ -349,6 +350,7 @@ static int start_thread(void *(*fn)(void *), void *arg) {
   if (r != 0) { u_thread_running = 0; return -1; } pthread_detach(t); return 0;
 }
 void upd_cancel(void) { u_cancel = 1; }
+void upd_retry(void) { pthread_mutex_lock(&um); int ok = ui.tag[0] != 0; if (ok) { ui.state = UPD_AVAILABLE; ui.quiet = 0; } pthread_mutex_unlock(&um); if (ok) upd_install(); }
 void upd_snapshot(UpdInfo *out) { pthread_mutex_lock(&um); *out = ui; pthread_mutex_unlock(&um); }
 int upd_busy(void) { pthread_mutex_lock(&um); UpdState s = ui.state; pthread_mutex_unlock(&um); return s == UPD_DOWNLOADING || s == UPD_VERIFYING || s == UPD_EXTRACTING || s == UPD_INSTALLING; }
 void upd_dismiss(void) { pthread_mutex_lock(&um); if (ui.state == UPD_ERROR || ui.state == UPD_UPTODATE) ui.state = UPD_IDLE; pthread_mutex_unlock(&um); }
@@ -377,9 +379,13 @@ void upd_init(void) {
 void upd_cleanup_helper(void) {
 #ifndef SAFE_BUILD
   SceIoStat st; if (sceIoGetstat(HELPER_MARKER, &st) < 0) return;
-  int res = load_paf(); if (res < 0) return;
+  // L'installatore (che ci ha appena riaperto) potrebbe essere ancora in uscita: cancellarlo mentre gira faceva chiudere l'app. Si aspetta.
+  utrace("pulizia installatore: attendo che sia uscito"); sceKernelDelayThread(4 * 1000 * 1000);
+  utrace("pulizia installatore: inizio");
+  int res = load_paf(); if (res < 0) { utrace("pulizia installatore: moduli non caricati 0x%08X", (unsigned)res); return; }
   res = sceSysmoduleLoadModuleInternal(SCE_SYSMODULE_INTERNAL_PROMOTER_UTIL);
   if (res >= 0) { if (scePromoterUtilityInit() >= 0) { scePromoterUtilityDeletePkg(HELPER_TITLE); scePromoterUtilityExit(); } sceSysmoduleUnloadModuleInternal(SCE_SYSMODULE_INTERNAL_PROMOTER_UTIL); }
   sceSysmoduleUnloadModuleInternalWithArg(SCE_SYSMODULE_INTERNAL_PAF, 0, NULL, NULL); sceIoRemove(HELPER_MARKER);
+  utrace("pulizia installatore: fine");
 #endif
 }

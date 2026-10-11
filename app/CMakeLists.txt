@@ -43,11 +43,12 @@ set(COMMON_FILES
 # Installatore (WHAPUPD01): app separata che chiude WhatsApp, installa il pacchetto scaricato e la riapre.
 add_executable(wa_updater helper/updater_helper.c)
 target_compile_options(wa_updater PRIVATE -Wall -O2)
-target_link_libraries(wa_updater mbedcrypto m SceAppMgr_stub ScePromoterUtil_stub SceSysmodule_stub SceIofilemgr_stub SceLibKernel_stub SceKernelModulemgr_stub SceKernelThreadMgr_stub)
+target_link_libraries(wa_updater mbedcrypto m SceDisplay_stub SceSysmem_stub SceAppMgr_stub ScePromoterUtil_stub SceSysmodule_stub SceIofilemgr_stub SceLibKernel_stub SceKernelModulemgr_stub SceKernelThreadMgr_stub)
 vita_create_self(wa-updater-eboot.bin wa_updater UNSAFE)
 set(VITA_PACK_VPK_FLAGS "")   # vita_create_vpk accumula i file di una chiamata nella successiva: si azzera ogni volta
 vita_create_vpk(wa-updater.vpk WHAPUPD01 wa-updater-eboot.bin VERSION "01.00" NAME "WhatsApp Updater"
-  FILE assets/vitashell-head.bin assets/vitashell-head.bin)
+  FILE assets/vitashell-head.bin assets/vitashell-head.bin
+  FILE assets/update-screen.raw assets/update-screen.raw)
 
 # versione completa: permessi estesi, puo' installare il plugin notifiche e aggiornarsi da sola
 vita_create_self(${PROJECT_NAME}.self ${PROJECT_NAME} UNSAFE)

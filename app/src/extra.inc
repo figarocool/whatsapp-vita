@@ -373,7 +373,7 @@ static void draw_viewer(void) {
   text(SW / 2 - 130, 14, RGBA8(200, 200, 200, 255), 15, "Tocca fuori dai pulsanti o premi Cerchio per chiudere");
 }
 
-enum { A_CLOSE = 1, A_NEW_GROUP, A_VIEW_CONTACT, A_SEARCH, A_MEDIA, A_MUTE_MENU, A_MUTE_8H, A_MUTE_1W, A_MUTE_ALWAYS, A_UNMUTE, A_DIS_MENU, A_DIS_OFF, A_DIS_24H, A_DIS_7D, A_DIS_90D, A_THEME_MENU, A_MORE, A_BLOCK, A_UNBLOCK, A_CLEAR, A_DELETE, A_EXPORT, A_ARCHIVE, A_DO_BLOCK, A_DO_CLEAR, A_DO_DELETE, A_LIST_ARCHIVED, A_LIST_PROFILE, A_LOGOUT, A_DO_LOGOUT, A_QUIT, A_INSTALL_PROBES, A_TOGGLE_SCALE, A_ABOUT_CUSTOM, A_REACT_VIEW, A_TOGGLE_UI, A_STORY_TEXT, A_STORY_PHOTO, A_TOGGLE_RECEIPTS, A_UNFOLLOW, A_DO_UNFOLLOW, A_INSTALL_PLUGIN, A_DECLINE_PLUGIN, A_REBOOT, A_TOGGLE_NOTIF, A_UNINSTALL_PLUGIN, A_DO_UNINSTALL, A_COMM_GROUP, A_COMM_RENAME, A_COMM_DESC, A_COMM_LEAVE, A_DO_COMM_LEAVE, A_UPD_NOW, A_UPD_LATER, A_UPD_ERR, A_THEME_BASE = 100, A_STORY_COL_BASE = 200, A_ABOUT_BASE = 300, A_REACT_BASE = 400 };
+enum { A_CLOSE = 1, A_NEW_GROUP, A_VIEW_CONTACT, A_SEARCH, A_MEDIA, A_MUTE_MENU, A_MUTE_8H, A_MUTE_1W, A_MUTE_ALWAYS, A_UNMUTE, A_DIS_MENU, A_DIS_OFF, A_DIS_24H, A_DIS_7D, A_DIS_90D, A_THEME_MENU, A_MORE, A_BLOCK, A_UNBLOCK, A_CLEAR, A_DELETE, A_EXPORT, A_ARCHIVE, A_DO_BLOCK, A_DO_CLEAR, A_DO_DELETE, A_LIST_ARCHIVED, A_LIST_PROFILE, A_LOGOUT, A_DO_LOGOUT, A_QUIT, A_INSTALL_PROBES, A_TOGGLE_SCALE, A_ABOUT_CUSTOM, A_REACT_VIEW, A_TOGGLE_UI, A_STORY_TEXT, A_STORY_PHOTO, A_TOGGLE_RECEIPTS, A_UNFOLLOW, A_DO_UNFOLLOW, A_INSTALL_PLUGIN, A_DECLINE_PLUGIN, A_REBOOT, A_TOGGLE_NOTIF, A_UNINSTALL_PLUGIN, A_DO_UNINSTALL, A_COMM_GROUP, A_COMM_RENAME, A_COMM_DESC, A_COMM_LEAVE, A_DO_COMM_LEAVE, A_UPD_NOW, A_UPD_LATER, A_UPD_ERR, A_UPD_RETRY, A_THEME_BASE = 100, A_STORY_COL_BASE = 200, A_ABOUT_BASE = 300, A_REACT_BASE = 400 };
 static void popup_begin(const char *title); static void popup_add(const char *label, int act, int red);
 // ---------- installazione plugin notifiche (taiHEN) ----------
 #define PLUGIN_LINE "ur0:tai/wa_notify.suprx"
@@ -550,6 +550,7 @@ static void popup_act(int act) {
     case A_UPD_NOW: upd_install(); break;
     case A_UPD_LATER: break;
     case A_UPD_ERR: upd_dismiss(); break;
+    case A_UPD_RETRY: upd_retry(); break;
     case A_COMM_GROUP: ime_open(IME_COMM_GNAME, "Nome del nuovo gruppo", ""); break;
     case A_COMM_RENAME: ime_open(IME_COMM_RENAME, "Nuovo nome della community", ""); break;
     case A_COMM_DESC: ime_open(IME_COMM_DESC2, "Descrizione della community", ""); break;
@@ -672,7 +673,7 @@ static void draw_update_overlay(void) {
   else snprintf(pc, sizeof pc, "%s", u.msg);
   text((SW - tw(18, pc)) / 2, by + 44, C_SUB, 18, pc);
   if (u.state == UPD_INSTALLING) text((SW - tw(16, "L'app si chiude e si riapre da sola: non spegnere la Vita")) / 2, 380, C_SUB, 16, "L'app si chiude e si riapre da sola: non spegnere la Vita");
-  if (u.state == UPD_DOWNLOADING) { rrect((SW - 220) / 2, 440, 220, 46, 23, C_BAR); text((SW - 220) / 2 + (220 - tw(18, "Annulla (Cerchio)")) / 2, 452, C_RED, 18, "Annulla (Cerchio)"); btn((SW - 220) / 2, 440, 220, 46, B_UPD_CANCEL, 0); }
+  if (u.state == UPD_DOWNLOADING) text((SW - tw(15, "L'aggiornamento e' obbligatorio: attendi il termine")) / 2, 440, C_SUB, 15, "L'aggiornamento e' obbligatorio: attendi il termine");
 }
 
 // ---------- disegno schermate aggiuntive ----------
@@ -818,16 +819,13 @@ static void extra_tick(void) {
     if (u.must_exit) { static unsigned t0; if (!t0) t0 = frame_no; if (frame_no - t0 > 120) quit_req = 1; }
     if (u.state == UPD_AVAILABLE && !popup_open && !ime_active && !upd_busy() && (screen == S_LIST || screen == S_PROFILE) && !(prompted_tag_set && !strcmp(prompted, u.tag))) {
       int failed_before = !strcmp(u.last_fail_tag, u.tag) && u.last_fail_code;
-      if (!(failed_before && u.quiet)) {
-        prompted_tag_set = 1; snprintf(prompted, sizeof prompted, "%s", u.tag);
-        char tt[160]; snprintf(tt, sizeof tt, "Nuova versione %s (hai %s)", u.tag, u.current);
-        popup_begin(tt);
-        if (u.can_install) popup_add("Scarica e installa ora", A_UPD_NOW, 0); else popup_add("Scarica il pacchetto", A_UPD_NOW, 0);
-        popup_add("Piu' tardi", A_UPD_LATER, 0);
-      } else { prompted_tag_set = 1; snprintf(prompted, sizeof prompted, "%s", u.tag); }
+      prompted_tag_set = 1; snprintf(prompted, sizeof prompted, "%s", u.tag);
+      if (u.can_install && !(failed_before && u.quiet)) { crumb("aggiornamento automatico a %s", u.tag); upd_install(); }   // obbligatorio: parte da solo, senza chiedere
+      else if (u.can_install) { char tt[160]; snprintf(tt, sizeof tt, "Aggiornamento %s non riuscito prima (codice %08X)", u.tag, (unsigned)u.last_fail_code); popup_begin(tt); popup_add("Riprova", A_UPD_RETRY, 0); popup_add("Chiudi", A_UPD_LATER, 0); }
+      else { char tt[160]; snprintf(tt, sizeof tt, "Nuova versione %s: installa la versione completa", u.tag); popup_begin(tt); popup_add("Scarica il pacchetto", A_UPD_NOW, 0); popup_add("Piu' tardi", A_UPD_LATER, 0); }
     }
     if (u.state == UPD_UPTODATE) { if (!u.quiet) { char t[96]; snprintf(t, sizeof t, "Gia' aggiornato (%s)", u.current); toast_set(t); } upd_dismiss(); }
-    if (u.state == UPD_ERROR && !popup_open && !ime_active) { if (u.quiet) upd_dismiss(); else { popup_begin(u.msg); popup_add("Chiudi", A_UPD_ERR, 0); } }
+    if (u.state == UPD_ERROR && !popup_open && !ime_active) { if (u.quiet) upd_dismiss(); else { popup_begin(u.msg); if (u.can_install && u.tag[0]) popup_add("Riprova", A_UPD_RETRY, 0); popup_add("Chiudi", A_UPD_ERR, 0); upd_dismiss(); } }   // dismiss subito: il popup non si riapre in ciclo
   }
   if (!viewer_open) { pthread_mutex_lock(&mu); for (int i = 0; i < nmed; i++) if (med[i].big || med[i].braw || med[i].bstate) { if (med[i].bstate == 3) continue; tex_retire(med[i].big); med[i].big = NULL; free(med[i].braw); med[i].braw = NULL; med[i].bstate = 0; } pthread_mutex_unlock(&mu); }   // la foto grande pesa: si libera appena si chiude il visualizzatore
   { // dopo una notifica: se l'app viene aperta entro 10 minuti porta direttamente nella chat del messaggio (il bridge se la ricorda)

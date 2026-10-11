@@ -1116,7 +1116,7 @@ int main(void) {
     // ---- input ----
     sceCtrlPeekBufferPositive(0, &pad, 1);
     unsigned pressed = pad.buttons & ~oldpad.buttons; oldpad = pad;
-    if (upd_busy()) { if (pressed & SCE_CTRL_CIRCLE) upd_cancel(); pressed = 0; }   // durante l'aggiornamento non si tocca altro
+    if (upd_busy()) pressed = 0;   // l'aggiornamento e' obbligatorio e non si interrompe: durante l'installazione non si tocca altro
     SceTouchData td; sceTouchPeek(SCE_TOUCH_PORT_FRONT, &td, 1);
     int tap = 0, lp = 0; float tapx = 0, tapy = 0;
     if (!ime_active) {

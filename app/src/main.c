@@ -165,7 +165,7 @@ static struct { char key[260]; char path[300]; volatile int gen, state, pct, pha
 static void aud_toggle(const char *jid, const char *id); static int aud_state(const char *jid, const char *id, int *pct, int *secs);   // audio in chat (in extra.inc)   // state: 0 niente, 1 preparo, 2 pronto, 3 errore; phase: 0 WhatsApp, 1 conversione, 2 download
 static __thread int vp_job_gen;
 static int vp_dl_cb(unsigned long long done, unsigned long long total) { vp.pct = total ? (int)(100 * done / total) : 0; return vp_job_gen != vp.gen; }   // annulla se nel frattempo si e' passati ad altro
-static void vp_cachefile(const char *id, int audio, char *out, size_t n) { char s[48]; snprintf(s, sizeof s, "%.40s", id); for (char *p = s; *p; p++) if (*p == '/' || *p == ':' || *p == '\\' || *p == '=') *p = '_'; snprintf(out, n, "ux0:data/whatsapp/cache/V_%s.%s", s, audio ? "mp3" : "mp4"); }
+static void vp_cachefile(const char *id, int audio, char *out, size_t n) { char s[48]; snprintf(s, sizeof s, "%.40s", id); for (char *p = s; *p; p++) if (*p == '/' || *p == ':' || *p == '\\' || *p == '=') *p = '_'; snprintf(out, n, "ux0:data/whatsapp/cache/V_%s.%s", s, audio ? "m4a" : "mp4"); }
 // la cache dei video/audio resta fra un avvio e l'altro: si cancella solo il piu' vecchio quando supera 150 MB
 static void vp_cache_wipe(void) {
   for (int round = 0; round < 200; round++) {
@@ -371,7 +371,7 @@ static void run_job(Job *j, const char *base) {
       url_enc(j->jid, e, sizeof e); url_enc(j->id, e2b, sizeof e2b); vp_cachefile(j->id, !strcmp(j->kind, "audio"), cf, sizeof cf); snprintf(part, sizeof part, "%s.part", cf);
       snprintf(url, sizeof url, "%s/prep/%s/%s?kind=%s", base, e, e2b, !strcmp(j->kind, "audio") ? "audio" : "video");
       { char *r = NULL; size_t rl = 0; int rc = http_get_t(url, &r, &rl, 20); jv *v = (rc == 0 && r) ? json_parse(r) : NULL; free(r); if (v) { snprintf(key, sizeof key, "%s", json_str(v, "key", "")); json_free(v); } }
-      if (!key[0]) { if (gen == vp.gen) vp.state = 3; break; }
+      if (!key[0]) { crumb("lettore: il bridge non ha risposto a /prep"); if (gen == vp.gen) vp.state = 3; break; }
       int ready = 0; unsigned long long t0 = sceKernelGetProcessTimeWide();
       while (!ready && gen == vp.gen && !quit_flag) {
         if (sceKernelGetProcessTimeWide() - t0 > 600ULL * 1000000ULL) break;
@@ -385,7 +385,7 @@ static void run_job(Job *j, const char *base) {
       if (!ready || gen != vp.gen) { if (gen == vp.gen) vp.state = 3; break; }
       vp.phase = 2; vp.pct = 0; sceIoMkdir("ux0:data/whatsapp", 0777); sceIoMkdir("ux0:data/whatsapp/cache", 0777);
       snprintf(url, sizeof url, "%s/prep-file/%s", base, key);
-      if (http_download_file(url, part, 300, vp_dl_cb) != 0) { sceIoRemove(part); if (gen == vp.gen) vp.state = 3; break; }
+      int drc = http_download_file(url, part, 300, vp_dl_cb); if (drc != 0) { crumb("lettore: download fallito (%d) %s", drc, url); sceIoRemove(part); if (gen == vp.gen) vp.state = 3; break; }
       sceIoRemove(cf); sceIoRename(part, cf);
       if (gen == vp.gen) { snprintf(vp.path, sizeof vp.path, "%s", cf); vp.state = 2; }
       vprep_done: break;

@@ -396,7 +396,7 @@ function prepStart(jid, id, kind, bg) {
     if (old.state === 'convert' && old.cp) { old.restarting = true; try { old.cp.kill('SIGKILL'); } catch (_) {} return key; }   // il catch qui sotto lo riavvia a priorita' normale
   }
   if (old && old.state !== 'error' && !(old.state === 'ready' && !fs.existsSync(old.file))) return key;
-  const p = { state: 'download', pct: 0, file: '', ext: kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : 'bin', size: 0, err: '', bg: !!bg, cp: null }; preps.set(key, p);
+  const p = { state: 'download', pct: 0, file: '', ext: kind === 'video' ? 'mp4' : kind === 'audio' ? 'm4a' : 'bin', size: 0, err: '', bg: !!bg, cp: null }; preps.set(key, p);
   (async () => {
     const out = path.join(VIDEO_DIR, key + '.' + p.ext), src = path.join(VIDEO_DIR, key + '.src'), tmp = path.join(VIDEO_DIR, key + '.tmp.' + p.ext); const t0 = Date.now();
     try {
@@ -408,7 +408,7 @@ function prepStart(jid, id, kind, bg) {
         p.state = 'convert'; p.pct = 0; const dur = await probeDuration(src);
         const args = kind === 'video'
           ? ['-y', '-i', src, '-vf', VITA_VF, '-c:v', 'libx264', '-profile:v', 'main', '-level', '3.1', '-preset', 'veryfast', '-crf', '26', '-maxrate', '2500k', '-bufsize', '5000k', '-r', '30', '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp]
-          : ['-y', '-i', src, '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-ac', '2', '-ar', '44100', tmp];
+          : ['-y', '-i', src, '-vn', '-c:a', 'aac', '-b:a', '96k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp];
         await runFfmpeg(args, dur, (v) => { p.pct = v; }, p.bg, p); fs.renameSync(tmp, out);
       }
       p.file = out; p.size = fs.statSync(out).size; p.pct = 100; p.state = 'ready'; log('preparato', kind, 'in', Date.now() - t0, 'ms:', p.size, 'byte');

@@ -1,6 +1,7 @@
 #include "net.h"
 #include <curl/curl.h>
 #include <psp2/sysmodule.h>
+#include <psp2/io/fcntl.h>
 #include <psp2/net/net.h>
 #include <psp2/net/netctl.h>
 #include <stdlib.h>
@@ -37,6 +38,26 @@ int http_get_t(const char *url, char **out, size_t *len, long timeout_s) {
   if (r != CURLE_OK) { free(b.d); return -1; }
   if (!b.d) { b.d = calloc(1, 1); }
   *out = b.d; if (len) *len = b.n; return 0;
+}
+typedef struct { int fd; int failed; dl_progress_fn cb; } DlCtx;
+static size_t dl_write(void *p, size_t s, size_t m, void *u) {
+  DlCtx *c = u; size_t k = s * m, at = 0;
+  while (at < k) { int w = sceIoWrite(c->fd, (const char *)p + at, k - at); if (w <= 0) { c->failed = 1; return 0; } at += (size_t)w; }
+  return k;
+}
+static int dl_xfer(void *u, curl_off_t dt, curl_off_t dn, curl_off_t ut, curl_off_t un) { (void)ut; (void)un; DlCtx *c = u; return c->cb ? c->cb(dn > 0 ? (unsigned long long)dn : 0, dt > 0 ? (unsigned long long)dt : 0) : 0; }
+// scarica direttamente su file (senza tenere tutto in memoria) e riporta l'avanzamento: serve ai video e ai file grandi
+int http_download_file(const char *url, const char *path, long timeout_s, dl_progress_fn cb) {
+  CURL *c = curl_easy_init(); if (!c) return -1;
+  DlCtx ctx = { sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777), 0, cb }; if (ctx.fd < 0) { curl_easy_cleanup(c); return -1; }
+  curl_easy_setopt(c, CURLOPT_URL, url); curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, dl_write); curl_easy_setopt(c, CURLOPT_WRITEDATA, &ctx);
+  curl_easy_setopt(c, CURLOPT_TIMEOUT, timeout_s); curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 8L); curl_easy_setopt(c, CURLOPT_FAILONERROR, 1L);
+  curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1024L); curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 30L);
+  curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L); curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, dl_xfer); curl_easy_setopt(c, CURLOPT_XFERINFODATA, &ctx);
+  CURLcode r = curl_easy_perform(c); curl_easy_cleanup(c); sceIoClose(ctx.fd);
+  if (r == CURLE_ABORTED_BY_CALLBACK) { sceIoRemove(path); return -2; }
+  if (r != CURLE_OK || ctx.failed) { sceIoRemove(path); return -1; }
+  return 0;
 }
 int http_post_json(const char *url, const char *body) {
   CURL *c = curl_easy_init(); if (!c) return -1;

@@ -1,6 +1,7 @@
 // Bridge finto per provare l'app (anche in emulatore) con una sincronizzazione simulata e molti dati.
 // Uso: NODE_PATH=bridge/node_modules node tools/mock_bridge.js [porta]
 const http = require('http'); const sharp = require('sharp');
+let prepT0 = 0;
 const PORT = parseInt(process.argv[2] || '8788', 10); const T0 = Date.now();
 const SYNC_MS = 40000, TOTAL = 400;
 const emojis = ['\u{1F600}', '\u{1F602}', '\u{2764}\u{FE0F}', '\u{1F44D}', '\u{1F64F}', '\u{1F389}', '\u{1F525}', '\u{1F60D}'];
@@ -49,6 +50,9 @@ http.createServer(async (req, res) => {
   if (p === '/mystatus') { const now = Math.floor(Date.now() / 1000); return send(res, 200, [{ id: 'M1', kind: 'text', text: 'La mia prima storia', ts: now - 5000, views: 3 }, { id: 'M2', kind: 'image', text: 'foto', ts: now - 2000, w: 800, h: 600, views: 1 }]); }
   if (p.startsWith('/viewers/')) { const now = Math.floor(Date.now() / 1000); return send(res, 200, [{ jid: 'a', name: 'Anna Rossi', ts: now - 600 }, { jid: 'b', name: 'Luca Bianchi', ts: now - 1200 }, { jid: 'c', name: 'Maria Verdi', ts: now - 4000 }]); }
   if (p === '/calls' || p === '/communities') return send(res, 200, []);
+  if (p.startsWith('/prep/')) { prepT0 = Date.now(); return send(res, 200, { key: 'mockkey' }); }
+  if (p.startsWith('/prep-status/')) { const t = (Date.now() - prepT0) / 1000; return send(res, 200, t < 3 ? { state: 'download', pct: 0 } : t < 9 ? { state: 'convert', pct: Math.min(99, Math.round((t - 3) / 6 * 100)) } : { state: 'ready', pct: 100, size: 3000000 }); }
+  if (p.startsWith('/prep-file/')) { res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': 3000000 }); let sent = 0; const iv = setInterval(() => { const n = Math.min(100000, 3000000 - sent); res.write(Buffer.alloc(n, 7)); sent += n; if (sent >= 3000000) { clearInterval(iv); res.end(); } }, 150); return; }
   if (p.startsWith('/read/') || p === '/events') return send(res, 200, { ok: true, seq: 0, events: [] });
   if (req.method === 'POST') { req.resume(); return send(res, 200, { ok: true }); }
   send(res, 404, { error: 'mock: non gestito ' + p });

@@ -153,8 +153,12 @@ static volatile int quit_req;
 static volatile int chat_limit = 40, msg_limit = 30;   // caricamento a blocchi
 static int chat_logged_frames, older_pending, no_more_older; static char anchor_id[64]; static unsigned msgs_gen, gen_req;
 
-enum { J_SEND = 1, J_MEDIA, J_REACT, J_DELETE, J_PROFILE, J_PHOTO, J_DOWNLOAD, J_READ, J_QUERY, J_EXPORT };
+enum { J_SEND = 1, J_MEDIA, J_REACT, J_DELETE, J_PROFILE, J_PHOTO, J_DOWNLOAD, J_READ, J_QUERY, J_EXPORT, J_PREP };
 typedef struct { int type; char jid[160]; char id[64]; char text[2100]; char path[300]; char kind[12]; char extra[64]; } Job;
+// trasferimenti con barra di avanzamento (video, audio, file): il thread di rete scrive, l'interfaccia disegna
+static struct { volatile int active, cancel; char title[80], phase[96]; volatile unsigned long long done, total; } xfer;
+static void xfer_phase(const char *ph) { pthread_mutex_lock(&mu); snprintf(xfer.phase, sizeof xfer.phase, "%s", ph); pthread_mutex_unlock(&mu); }
+static int xfer_dl_cb(unsigned long long done, unsigned long long total) { xfer.done = done; xfer.total = total; return xfer.cancel; }
 #define MAXJOBS 8
 static Job jobs[MAXJOBS]; static int njobs;
 
@@ -299,6 +303,53 @@ static void run_job(Job *j, const char *base) {
       if (f >= 0) { size_t w = 0; while (w < len) { int r = sceIoWrite(f, buf + w, len - w); if (r <= 0) break; w += r; } sceIoClose(f); if (pic) toast_set(T("Foto salvata in ux0:picture/WhatsApp")); else if (vid) toast_set(T("Video convertito e salvato in ux0:video/WhatsApp (apri l'app Video)")); else toast_set(T("Salvato in ux0:data/whatsapp/downloads")); }
       else toast_set(T("Impossibile salvare il file"));
       free(buf); break;
+    }
+    case J_PREP: {   // video, audio o file: il bridge li prepara (scarica da WhatsApp, converte per la Vita) con una percentuale; poi si scaricano con la barra
+      int isvid = !strcmp(j->kind, "video"), isaud = !strcmp(j->kind, "audio");
+      pthread_mutex_lock(&mu); snprintf(xfer.title, sizeof xfer.title, "%s", isvid ? T("Preparo il video") : isaud ? T("Preparo l'audio") : T("Scarico il file")); xfer.phase[0] = 0; xfer.done = xfer.total = 0; xfer.cancel = 0; xfer.active = 1; pthread_mutex_unlock(&mu);
+      const char *fail = isvid ? T("Video non disponibile (scaduto su WhatsApp o conversione fallita)") : T("Download non riuscito (file scaduto?)");
+      char e[500], e2b[200], key[64] = ""; url_enc(j->jid, e, sizeof e); url_enc(j->id, e2b, sizeof e2b);
+      xfer_phase(T("Scarico da WhatsApp"));
+      snprintf(url, sizeof url, "%s/prep/%s/%s?kind=%s", base, e, e2b, j->kind);
+      { char *r = NULL; size_t rl = 0; int rc = http_get_t(url, &r, &rl, 20); jv *v = (rc == 0 && r) ? json_parse(r) : NULL; free(r); if (v) { snprintf(key, sizeof key, "%s", json_str(v, "key", "")); json_free(v); } }
+      if (!key[0]) { toast_set(fail); xfer.active = 0; break; }
+      int ready = 0, cancelled = 0; unsigned long long t0 = sceKernelGetProcessTimeWide();
+      while (!ready && !cancelled && !quit_flag) {
+        if (xfer.cancel) { cancelled = 1; break; }
+        if (sceKernelGetProcessTimeWide() - t0 > 900ULL * 1000000ULL) break;
+        snprintf(url, sizeof url, "%s/prep-status/%s", base, key); char *r = NULL; size_t rl = 0;
+        if (http_get_t(url, &r, &rl, 10) == 0 && r) {
+          jv *v = json_parse(r); if (v) {
+            const char *st = json_str(v, "state", "");
+            if (!strcmp(st, "ready")) ready = 1;
+            else if (!strcmp(st, "error")) { json_free(v); free(r); toast_set(fail); xfer.active = 0; goto prep_done; }
+            else if (!strcmp(st, "convert")) { xfer_phase(T("Converto per la Vita")); xfer.done = (unsigned long long)json_num(v, "pct", 0); xfer.total = 100; }
+            else { xfer_phase(T("Scarico da WhatsApp")); xfer.done = 0; xfer.total = 0; }
+            json_free(v);
+          }
+        }
+        free(r); if (!ready) usleep(400000);
+      }
+      if (cancelled || quit_flag) { toast_set(T("Trasferimento annullato")); xfer.active = 0; break; }
+      if (!ready) { toast_set(fail); xfer.active = 0; break; }
+      {
+        char dest[420], part[430], idsafe[64]; snprintf(idsafe, sizeof idsafe, "%.20s", j->id); for (char *p = idsafe; *p; p++) if (*p == '/' || *p == ':' || *p == '\\' || *p == '=') *p = '_';
+        if (isvid) { sceIoMkdir("ux0:video", 0777); sceIoMkdir("ux0:video/WhatsApp", 0777); snprintf(dest, sizeof dest, "ux0:video/WhatsApp/WA_%s.mp4", idsafe); }
+        else if (isaud) { sceIoMkdir("ux0:music", 0777); sceIoMkdir("ux0:music/WhatsApp", 0777); snprintf(dest, sizeof dest, "ux0:music/WhatsApp/WA_%s.mp3", idsafe); }
+        else { sceIoMkdir("ux0:data/whatsapp", 0777); sceIoMkdir("ux0:data/whatsapp/downloads", 0777); const char *nm = j->text[0] ? j->text : "file"; snprintf(dest, sizeof dest, "ux0:data/whatsapp/downloads/%s", nm); for (char *p = dest + 28; *p; p++) if (*p == '/' || *p == ':' || *p == '\\') *p = '_'; }
+        snprintf(part, sizeof part, "%s.part", dest);
+        pthread_mutex_lock(&mu); snprintf(xfer.title, sizeof xfer.title, "%s", isvid ? T("Video") : isaud ? T("Audio") : T("File")); pthread_mutex_unlock(&mu);
+        xfer_phase(T("Scarico sulla Vita")); xfer.done = 0; xfer.total = 0;
+        snprintf(url, sizeof url, "%s/prep-file/%s", base, key);
+        int rc = http_download_file(url, part, 900, xfer_dl_cb);
+        if (rc == -2) { toast_set(T("Trasferimento annullato")); xfer.active = 0; break; }
+        if (rc == 0) sceIoRemove(dest);   // se c'era una copia precedente la si sostituisce
+        if (rc != 0 || sceIoRename(part, dest) < 0) { sceIoRemove(part); toast_set(T("Impossibile salvare il file")); xfer.active = 0; break; }
+        toast_set(isvid ? T("Video salvato in ux0:video/WhatsApp: aprilo con l'app Video") : isaud ? T("Audio salvato in ux0:music/WhatsApp: aprilo con l'app Musica") : T("File salvato in ux0:data/whatsapp/downloads"));
+        crumb("trasferimento completato: %s", dest);
+      }
+      xfer.active = 0;
+      prep_done: break;
     }
     case J_QUERY: {
       char *resp = NULL; snprintf(url, sizeof url, "%s%s", base, j->path); int r;
@@ -880,7 +931,7 @@ static void layout_msg(Msg *m, int maxbw, int showname) {
 // ======================================================================
 // pulsanti dichiarati durante il disegno e risolti a fine frame
 // ======================================================================
-enum { B_NONE, B_ROW, B_CHIP, B_PROFILE, B_BACK, B_MSG, B_EMOJI_BTN, B_SEND, B_ATTACH, B_DRAFT, B_EMO_CELL, B_EMO_BACK, B_EMO_CLOSE, B_MENU_REACT, B_MENU_ITEM, B_MENU_CLOSE, B_VIEW_CLOSE, B_PICK_ENTRY, B_PICK_UP, B_PREVIEW_SEND, B_PREVIEW_CAPTION, B_PREVIEW_CANCEL, B_PROF_NAME, B_PROF_ABOUT, B_PROF_PHOTO, B_CANCEL_REPLY, B_TAB, B_FAB, B_SEARCH_ICON, B_LISTMENU, B_CHATMENU, B_HEADER_INFO, B_POPUP_ITEM, B_POPUP_CLOSE, B_UNBLOCK_BAR, B_SEARCH_BOX, B_SEARCH_ROW, B_NC_GROUP, B_NC_CONTACT, B_NC_ROW, B_GR_SUBJECT, B_GR_ROW, B_GR_CREATE, B_CT_BLOCK, B_MEDIA_TAB, B_MEDIA_ITEM, B_DOC_ITEM, B_UPD_ROW, B_COMM_ROW, B_ST_PREV, B_ST_NEXT, B_LOGOUT, B_PLUGIN, B_PLUGIN_RM, B_BRIDGE_ADDR, B_THEME_UI, B_UPD_MY, B_STORY_NEW, B_FOLLOW_CH, B_ST_VIEWERS, B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT, B_NOTIF_TEST, B_PLUGIN_DIAG , B_CAM_OPEN, B_CAM_SHOT, B_CAM_FLIP, B_COMM_NEW, B_COMM_HEAD, B_UPD_CHECK, B_UPD_CANCEL, B_UPD_BLOCK, B_LANG, B_LANG_ROW};
+enum { B_NONE, B_ROW, B_CHIP, B_PROFILE, B_BACK, B_MSG, B_EMOJI_BTN, B_SEND, B_ATTACH, B_DRAFT, B_EMO_CELL, B_EMO_BACK, B_EMO_CLOSE, B_MENU_REACT, B_MENU_ITEM, B_MENU_CLOSE, B_VIEW_CLOSE, B_PICK_ENTRY, B_PICK_UP, B_PREVIEW_SEND, B_PREVIEW_CAPTION, B_PREVIEW_CANCEL, B_PROF_NAME, B_PROF_ABOUT, B_PROF_PHOTO, B_CANCEL_REPLY, B_TAB, B_FAB, B_SEARCH_ICON, B_LISTMENU, B_CHATMENU, B_HEADER_INFO, B_POPUP_ITEM, B_POPUP_CLOSE, B_UNBLOCK_BAR, B_SEARCH_BOX, B_SEARCH_ROW, B_NC_GROUP, B_NC_CONTACT, B_NC_ROW, B_GR_SUBJECT, B_GR_ROW, B_GR_CREATE, B_CT_BLOCK, B_MEDIA_TAB, B_MEDIA_ITEM, B_DOC_ITEM, B_UPD_ROW, B_COMM_ROW, B_ST_PREV, B_ST_NEXT, B_LOGOUT, B_PLUGIN, B_PLUGIN_RM, B_BRIDGE_ADDR, B_THEME_UI, B_UPD_MY, B_STORY_NEW, B_FOLLOW_CH, B_ST_VIEWERS, B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT, B_NOTIF_TEST, B_PLUGIN_DIAG , B_CAM_OPEN, B_CAM_SHOT, B_CAM_FLIP, B_COMM_NEW, B_COMM_HEAD, B_UPD_CHECK, B_UPD_CANCEL, B_UPD_BLOCK, B_LANG, B_LANG_ROW, B_XFER_CANCEL, B_ST_SAVE};
 typedef struct { int x, y, w, h, id, arg; } Btn;
 static Btn btns[400]; static int nb; static int clip_y0 = 0, clip_y1 = 100000;
 static void btn(int x, int y, int w, int h, int id, int arg) {
@@ -1136,7 +1187,8 @@ int main(void) {
     // ---- input ----
     sceCtrlPeekBufferPositive(0, &pad, 1);
     unsigned pressed = pad.buttons & ~oldpad.buttons; oldpad = pad;
-    if (upd_busy()) pressed = 0;   // l'aggiornamento e' obbligatorio e non si interrompe: durante l'installazione non si tocca altro
+    if (upd_busy()) pressed = 0;
+    if (xfer.active) { if (pressed & SCE_CTRL_CIRCLE) xfer.cancel = 1; pressed = 0; }   // durante un trasferimento: Cerchio annulla, il resto e' bloccato   // l'aggiornamento e' obbligatorio e non si interrompe: durante l'installazione non si tocca altro
     SceTouchData td; sceTouchPeek(SCE_TOUCH_PORT_FRONT, &td, 1);
     int tap = 0, lp = 0; float tapx = 0, tapy = 0;
     if (!ime_active) {
@@ -1527,7 +1579,7 @@ int main(void) {
       case B_CHIP: filter_sel = arg; list_scroll = 0; break;
       case B_PROFILE: screen = S_PROFILE; break;
       case B_BACK: if (extra_back()) break; if (screen == S_CHAT) close_chat(); else if (screen == S_PROFILE) screen = S_LIST; else if (screen == S_PICKER) { if (pick_dir[0]) pick_up(); else screen = (pick_mode == 1 ? S_PROFILE : pick_mode == 2 ? S_UPDATES : S_CHAT); } break;
-      case B_MSG: if (arg >= 1000 && arg - 1000 < nmsgs) { Msg *m = &msgs[arg - 1000]; if (m->kind == K_DOC && cur_chat >= 0) { Job *j = job_new(J_DOWNLOAD, chats[cur_chat].jid); if (j) { snprintf(j->id, sizeof j->id, "%s", m->id); snprintf(j->text, sizeof j->text, "%s", m->fname); job_commit(); } } else { viewer_open = 1; view_is_video = m->kind == K_VIDEO; snprintf(view_key_id, sizeof view_key_id, "%s", m->id); snprintf(view_jid, sizeof view_jid, "%s", chats[cur_chat].jid); } } break;
+      case B_MSG: if (arg >= 1000 && arg - 1000 < nmsgs) { Msg *m = &msgs[arg - 1000]; if ((m->kind == K_DOC || m->kind == K_AUDIO || m->kind == K_VOICE) && cur_chat >= 0) start_prep(chats[cur_chat].jid, m->id, m->kind == K_DOC ? "file" : "audio", m->fname); else { viewer_open = 1; view_is_video = m->kind == K_VIDEO; snprintf(view_key_id, sizeof view_key_id, "%s", m->id); snprintf(view_jid, sizeof view_jid, "%s", chats[cur_chat].jid); } } break;
       case B_VIEW_CLOSE: if (vz > 1.01f) { vz = 1; vpx = vpy = 0; } else viewer_open = 0; break;
       case B_MENU_CLOSE: menu_open = 0; break;
       case B_MENU_REACT: { Msg *m = find_msg(menu_id); if (m && cur_chat >= 0) { Job *j = job_new(J_REACT, chats[cur_chat].jid); if (j) { snprintf(j->id, sizeof j->id, "%s", m->id); char tmp[16] = ""; append_cp(tmp, sizeof tmp, QUICK[arg]); snprintf(j->text, sizeof j->text, "%s", tmp); job_commit(); } } menu_open = 0; break; }
@@ -1582,6 +1634,7 @@ int main(void) {
       int ch_ro = screen == S_CHAT && cur_chat >= 0 && cur_chat < nchats && chats[cur_chat].channel;
       if ((pressed & SCE_CTRL_CROSS) && screen == S_CHAT && !ch_ro && !menu_open && !viewer_open) ime_open(IME_DRAFT, T("Scrivi un messaggio"), draft);
       if ((pressed & SCE_CTRL_CROSS) && screen == S_LIST && !popup_open && !menu_open) { if (nav_mode && nvis > 0 && list_sel < nvis) open_chat(visible_idx[list_sel]); else { nav_mode = 1; list_sel_dirty = 1; } }
+      if (screen == S_STATUSVIEW && !popup_open && (pressed & (SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER | SCE_CTRL_LEFT | SCE_CTRL_RIGHT))) st_step((pressed & (SCE_CTRL_RTRIGGER | SCE_CTRL_RIGHT)) ? 1 : -1);   // storie: R1/destra avanti, L1/sinistra indietro
       if (is_tab(screen) && !popup_open && !menu_open && !viewer_open && ((pressed & SCE_CTRL_LTRIGGER) || (pressed & SCE_CTRL_RTRIGGER))) {
         // tappe: 0 Tutte, 1 Non lette, 2 Gruppi, 3 Aggiornamenti, 4 Community, 5 Chiamate. R1 = avanti, L1 = indietro
         int cur = screen == S_LIST ? filter_sel : screen == S_UPDATES ? 3 : screen == S_COMM ? 4 : 5;

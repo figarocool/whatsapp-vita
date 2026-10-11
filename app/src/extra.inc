@@ -194,6 +194,10 @@ static void draw_statusview(void) {
   draw_avatar(jd, nm, 44, 44, 18); textb(74, 26, C_WHITE, 20, nm);
   char tm[16]; fmt_ago((long)json_num(it, "ts", 0), tm, sizeof tm); text(74, 50, RGBA8(255, 255, 255, 200), 13, tm);
   btn(0, 0, SW / 3, SH, B_ST_PREV, 0); btn(SW / 3, 0, SW - SW / 3, SH, B_ST_NEXT, 0);
+  if (!strcmp(kind, "video")) {   // i video delle storie: si convertono per la Vita e si salvano (con barra di avanzamento)
+    const char *lb = T("Salva video"); int w = tw(18, lb) + 60; int bx = st_mine ? 20 : (SW - w) / 2;
+    rrect(bx, SH - 62, w, 44, 22, RGBA8(0x25, 0xD3, 0x66, 255)); text(bx + 30, SH - 51, C_WHITE, 18, lb); btn(bx, SH - 62, w, 44, B_ST_SAVE, 0);
+  }
   if (st_mine) {
     char v[60]; snprintf(v, sizeof v, T("Visto da %d"), (int)json_num(it, "views", 0)); int w = tw(18, v) + 50;
     rrect((SW - w) / 2, SH - 62, w, 44, 22, RGBA8(32, 32, 32, 255)); text((SW - w) / 2 + 25, SH - 51, C_WHITE, 18, v); btn((SW - w) / 2, SH - 62, w, 44, B_ST_VIEWERS, 0);
@@ -712,6 +716,41 @@ static void draw_lang(void) {
   vita2d_disable_clipping(); clip_y0 = 0; clip_y1 = SH;
 }
 
+
+// ---------- storie: avanti e indietro (tocco, L1/R1, croce) ----------
+static void st_step(int dir) {
+  jv *a = qarr("updates"); jv *its = st_mine ? qres2_arr("mystatus") : (a && st_idx < a->count ? json_get(a->items[st_idx], "items") : NULL);
+  if (dir < 0) {
+    if (st_item > 0) st_item--;
+    else if (!st_mine && a && st_idx > 0) { st_idx--; jv *p = json_get(a->items[st_idx], "items"); st_item = p && p->count ? p->count - 1 : 0; }   // indietro: ultima storia del contatto precedente
+  } else {
+    if (its && st_item + 1 < its->count) st_item++;
+    else if (!st_mine && a && st_idx + 1 < a->count) { st_idx++; st_item = 0; }   // avanti: prima storia del contatto successivo
+    else screen = S_UPDATES;
+  }
+}
+// ---------- trasferimenti (video, audio, file) ----------
+static void start_prep(const char *jid, const char *id, const char *kind, const char *fname) {
+  if (xfer.active) return;
+  Job *j = job_new(J_PREP, jid); if (!j) { toast_set(T("Coda piena, riprova")); return; }
+  snprintf(j->id, sizeof j->id, "%s", id); snprintf(j->kind, sizeof j->kind, "%s", kind); snprintf(j->text, sizeof j->text, "%s", fname ? fname : ""); job_commit();
+  pthread_mutex_lock(&mu); xfer.active = 1; xfer.cancel = 0; xfer.done = xfer.total = 0; xfer.title[0] = 0; xfer.phase[0] = 0; pthread_mutex_unlock(&mu);   // l'overlay compare subito
+}
+static void draw_xfer_overlay(void) {
+  if (!xfer.active) return;
+  char title[80], phase[96]; pthread_mutex_lock(&mu); snprintf(title, sizeof title, "%s", xfer.title); snprintf(phase, sizeof phase, "%s", xfer.phase); unsigned long long done = xfer.done, total = xfer.total; pthread_mutex_unlock(&mu);
+  vita2d_draw_rectangle(0, 0, SW, SH, C_BG); btn(0, 0, SW, SH, B_UPD_BLOCK, 0);
+  textb((SW - tw(30, title)) / 2, 120, C_GREEN2, 30, title);
+  if (phase[0]) text((SW - tw(22, phase)) / 2, 190, C_TEXT, 22, phase);
+  float frac = total > 0 ? (float)done / (float)total : 0; if (frac > 1) frac = 1; float bw = 640, bx = (SW - bw) / 2, by = 250;
+  rrect(bx, by, bw, 26, 13, C_DIV);
+  if (total > 0) { float fw = bw * frac; if (fw < 26) fw = 26; rrect(bx, by, fw, 26, 13, C_GREEN2); }
+  else { float ph = (float)(frame_no % 90) / 90.0f; float fw = 160, fx = bx + (bw - fw) * (ph < 0.5f ? ph * 2 : 2 - ph * 2); rrect(fx, by, fw, 26, 13, C_GREEN2); }
+  char pc[96] = ""; if (total > 0) { if (total > 100) snprintf(pc, sizeof pc, "%d%%   -   %.1f / %.1f MB", (int)(frac * 100), done / 1048576.0, total / 1048576.0); else snprintf(pc, sizeof pc, "%d%%", (int)(frac * 100)); }
+  if (pc[0]) text((SW - tw(18, pc)) / 2, by + 44, C_SUB, 18, pc);
+  rrect((SW - 260) / 2, 420, 260, 46, 23, C_BAR); text((SW - 260) / 2 + (260 - tw(18, T("Annulla (Cerchio)"))) / 2, 432, C_RED, 18, T("Annulla (Cerchio)")); btn((SW - 260) / 2, 420, 260, 46, B_XFER_CANCEL, 0);
+}
+
 // ---------- disegno schermate aggiuntive ----------
 static void draw_extra_screens(void) {
   switch (screen) {
@@ -731,6 +770,7 @@ static void draw_extra_screens(void) {
   draw_viewer();
   draw_popup();
   draw_update_overlay();
+  draw_xfer_overlay();
 }
 
 // ---------- gestione tocchi ----------
@@ -786,13 +826,14 @@ static void handle_extra(int id, int arg) {
     case B_CAM_FLIP: { int d = cam_dev ^ 1; cam_stop(); if (cam_start(d) < 0) cam_start(d ^ 1); break; }
     case B_UPD_CHECK: { UpdInfo u; upd_snapshot(&u); if (u.state == UPD_AVAILABLE) u.state = UPD_IDLE; upd_check(1); toast_set(T("Controllo aggiornamenti...")); break; }
     case B_UPD_CANCEL: upd_cancel(); break;
+    case B_XFER_CANCEL: xfer.cancel = 1; break;
     case B_LANG: screen = S_LANG; misc_scroll = 0; break;
     case B_LANG_ROW: lang_select(arg); break;
     case B_UPD_BLOCK: break;
     case B_COMM_NEW: ime_open(IME_COMM_NAME, T("Nome della community"), ""); break;
     case B_COMM_HEAD: { jv *a = qarr("comm"); if (a && arg < a->count) { comm_sel_idx = arg; snprintf(comm_sel, sizeof comm_sel, "%s", json_str(a->items[arg], "id", "")); char tt[160]; snprintf(tt, sizeof tt, "%s", json_str(a->items[arg], "subject", T("Community")));
         popup_begin(tt); popup_add(T("Crea un gruppo nella community"), A_COMM_GROUP, 0); popup_add(T("Rinomina"), A_COMM_RENAME, 0); popup_add(T("Cambia descrizione"), A_COMM_DESC, 0); popup_add(T("Esci dalla community"), A_COMM_LEAVE, 1); popup_add(T("Chiudi"), A_CLOSE, 0); } break; }
-    case B_VIEW_SAVE: { Job *j = job_new(J_DOWNLOAD, view_jid); if (j) { snprintf(j->id, sizeof j->id, "%s", view_key_id); snprintf(j->kind, sizeof j->kind, "%s", view_is_video ? "vid" : "pic"); job_commit(); } break; }
+    case B_VIEW_SAVE: if (view_is_video) { start_prep(view_jid, view_key_id, "video", ""); break; } { Job *j = job_new(J_DOWNLOAD, view_jid); if (j) { snprintf(j->id, sizeof j->id, "%s", view_key_id); snprintf(j->kind, sizeof j->kind, "%s", view_is_video ? "vid" : "pic"); job_commit(); } break; }
     case B_VIEW_REPLY: { int ci = chat_index(view_jid); if (ci >= 0) { if (!(screen == S_CHAT && cur_chat == ci)) open_chat(ci); viewer_open = 0; Msg *m = find_msg(view_key_id); snprintf(reply_id, sizeof reply_id, "%s", view_key_id); edit_id[0] = 0; snprintf(reply_name, sizeof reply_name, "%s", m && m->from_me ? T("Tu") : (m && m->name[0] ? m->name : chats[ci].name)); snprintf(reply_text, sizeof reply_text, "%s", view_is_video ? T("Video") : T("Foto")); ime_open(IME_DRAFT, T("Scrivi un messaggio"), draft); } break; }
     case B_VIEW_REACT: popup_begin(T("Reagisci")); { static const unsigned em[6] = { 0x1F44D, 0x2764, 0x1F602, 0x1F62E, 0x1F622, 0x1F64F }; for (int i = 0; i < 6; i++) { char t[16] = ""; append_cp(t, sizeof t, em[i]); popup_add(t, A_REACT_BASE + i, 0); } } break;
     case B_THEME_UI: popup_act(A_TOGGLE_UI); break;
@@ -826,8 +867,9 @@ static void handle_extra(int id, int arg) {
     case B_STORY_NEW: popup_begin(T("Nuova storia")); popup_add(T("Testo"), A_STORY_TEXT, 0); popup_add(T("Foto"), A_STORY_PHOTO, 0); popup_add(T("Annulla"), A_CLOSE, 0); break;
     case B_FOLLOW_CH: ime_open(IME_CHLINK, T("Link del canale"), ""); break;
     case B_ST_VIEWERS: { jv *its = qres2_arr("mystatus"); if (its && st_item < its->count) { char e[100], pth[200]; url_enc(json_str(its->items[st_item], "id", ""), e, sizeof e); snprintf(pth, sizeof pth, "/viewers/%s", e); query2("viewers", pth); viewers_wait = 1; } break; }
-    case B_ST_PREV: if (st_item > 0) st_item--; break;
-    case B_ST_NEXT: { jv *a = qarr("updates"); jv *its = st_mine ? qres2_arr("mystatus") : (a && st_idx < a->count ? json_get(a->items[st_idx], "items") : NULL); if (its && st_item + 1 < its->count) st_item++; else screen = S_UPDATES; break; }
+    case B_ST_SAVE: { jv *a = qarr("updates"); jv *its = st_mine ? qres2_arr("mystatus") : (a && st_idx < a->count ? json_get(a->items[st_idx], "items") : NULL); if (its && st_item < its->count) start_prep("status@broadcast", json_str(its->items[st_item], "id", ""), "video", ""); break; }
+    case B_ST_PREV: st_step(-1); break;
+    case B_ST_NEXT: st_step(1); break;
     case B_COMM_ROW: { jv *a = qarr("comm"); if (!a) break; int ci = arg / 100, gi = arg % 100; if (ci < a->count) { jv *g = json_get(a->items[ci], "groups"); if (g && gi < g->count) open_by_jid(json_str(g->items[gi], "id", "")); } break; }
     default: break;
   }
@@ -895,6 +937,7 @@ static void extra_tick(void) {
       else if (opened_o && frame_no % 300 == 0 && cur_chat >= 0 && cur_chat < nchats) crumb("debug: chat mostrata ora: %s (indice %d)", chats[cur_chat].jid, cur_chat); }
     else if (dbg_key == 'u') {                          // prova dell'aggiornamento: accetta da solo la versione nuova
       UpdInfo u_; upd_snapshot(&u_); if (u_.state == UPD_AVAILABLE) { crumb("debug: avvio l'aggiornamento a %s", u_.tag); upd_install(); dbg_key = 0; } }
+    else if (dbg_key == 'q') { static int started_q; if (!started_q && frame_no > 700 && screen == S_LIST) { started_q = 1; crumb("debug: avvio un trasferimento di prova"); start_prep("test@s.whatsapp.net", "VID123", "video", ""); } }
     else if (dbg_key == 'v') {                          // prova del visualizzatore: apre la prima chat e la prima immagine
       static int opened;
       if (!opened && nchats > 3) { for (int i = 0; i < nchats; i++) if (!chats[i].channel && !chats[i].group) { open_chat(i); break; } opened = 1; }

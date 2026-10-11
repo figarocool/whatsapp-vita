@@ -368,6 +368,46 @@ function convertForVita(jid, id) {
   })().finally(() => { converting.delete(key); try { fs.unlinkSync(path.join(VIDEO_DIR, key + '.src')); fs.unlinkSync(path.join(VIDEO_DIR, key + '.tmp.mp4')); } catch (_) {} });
   converting.set(key, pr); return pr;
 }
+// ---------- video, audio e file per la Vita, con avanzamento reale ----------
+// L'app avvia un lavoro (/prep), ne legge lo stato (/prep-status: scarico da WhatsApp, conversione con percentuale) e poi scarica il risultato (/prep-file).
+const preps = new Map();   // chiave -> { state: download|convert|ready|error, pct, file, ext, size, err }
+const sha1hex = (t) => require('crypto').createHash('sha1').update(t).digest('hex');
+const VITA_VF = "scale=w='min(720,iw)':h='min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p";
+function probeDuration(file) { return new Promise((res) => require('child_process').execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { timeout: 20000 }, (e, so) => res(e ? 0 : parseFloat(so) || 0))); }
+function runFfmpeg(args, durSec, onPct) {
+  return new Promise((resolve, reject) => {
+    const cp = require('child_process').spawn('ffmpeg', [...args, '-progress', 'pipe:1', '-nostats', '-loglevel', 'error'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let err = '', buf = '';
+    cp.stderr.on('data', (d) => { err = (err + d).slice(-300); });
+    cp.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); const m = /^out_time_(?:us|ms)=(\d+)/.exec(line); if (m && durSec > 0) onPct(Math.min(99, Math.round(100 * Number(m[1]) / 1e6 / durSec))); } });
+    const t = setTimeout(() => { cp.kill('SIGKILL'); reject(new Error('conversione troppo lunga')); }, 600000);
+    cp.on('close', (c) => { clearTimeout(t); c === 0 ? resolve() : reject(new Error('ffmpeg: ' + err)); });
+  });
+}
+function prepStart(jid, id, kind) {
+  const key = sha1hex(jid + '|' + id + '|' + kind), old = preps.get(key);
+  if (old && old.state !== 'error' && !(old.state === 'ready' && !fs.existsSync(old.file))) return key;
+  const p = { state: 'download', pct: 0, file: '', ext: kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : 'bin', size: 0, err: '' }; preps.set(key, p);
+  (async () => {
+    const out = path.join(VIDEO_DIR, key + '.' + p.ext), src = path.join(VIDEO_DIR, key + '.src'), tmp = path.join(VIDEO_DIR, key + '.tmp.' + p.ext); const t0 = Date.now();
+    try {
+      if (fs.existsSync(out)) { p.file = out; p.size = fs.statSync(out).size; p.pct = 100; p.state = 'ready'; return; }
+      const m = raws.get(jid)?.get(id); if (!m) throw new Error('messaggio non trovato');
+      fs.writeFileSync(src, await download(m));
+      if (kind === 'file') fs.renameSync(src, out);
+      else {
+        p.state = 'convert'; p.pct = 0; const dur = await probeDuration(src);
+        const args = kind === 'video'
+          ? ['-y', '-i', src, '-vf', VITA_VF, '-c:v', 'libx264', '-profile:v', 'main', '-level', '3.1', '-preset', 'veryfast', '-crf', '26', '-maxrate', '1500k', '-bufsize', '3000k', '-r', '30', '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp]
+          : ['-y', '-i', src, '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-ac', '2', '-ar', '44100', tmp];
+        await runFfmpeg(args, dur, (v) => { p.pct = v; }); fs.renameSync(tmp, out);
+      }
+      p.file = out; p.size = fs.statSync(out).size; p.pct = 100; p.state = 'ready'; log('preparato', kind, 'in', Date.now() - t0, 'ms:', p.size, 'byte');
+    } catch (e) { p.state = 'error'; p.err = String(e.message || e).slice(0, 120); log('preparazione fallita', kind, p.err); }
+    finally { for (const f of [src, tmp]) { try { fs.unlinkSync(f); } catch (_) {} } }
+  })();
+  return key;
+}
 // Le foto si preparano in anticipo (download da WhatsApp + riduzione) con al massimo 2 lavori alla volta; una richiesta che arriva
 // mentre la stessa foto e' gia' in preparazione si accoda a quella invece di rifare tutto.
 // Versione grande (max 1280 px) per il visualizzatore con zoom; si salva su disco e non resta in memoria.
@@ -531,6 +571,16 @@ http.createServer(async (req, res) => {
       const m = q.get('big') ? await bigMediaFor(jid, id) : await mediaFor(jid, id);
       if (!m) return json(res, 404, { error: 'no media' });
       res.writeHead(200, { 'Content-Type': m.type }); return res.end(m.buf);
+    }
+    if (p.startsWith('/prep/')) {
+      const [jid, id] = arg('/prep/').split('/'); const kind = q.get('kind') || 'file';
+      if (!['video', 'audio', 'file'].includes(kind)) return json(res, 400, { error: 'tipo non valido' });
+      return json(res, 200, { key: prepStart(jid, id, kind) });
+    }
+    if (p.startsWith('/prep-status/')) { const x = preps.get(arg('/prep-status/')); if (!x) return json(res, 404, { error: 'sconosciuto' }); return json(res, 200, { state: x.state, pct: x.pct, size: x.size, err: x.err }); }
+    if (p.startsWith('/prep-file/')) {
+      const x = preps.get(arg('/prep-file/')); if (!x || x.state !== 'ready' || !fs.existsSync(x.file)) return json(res, 404, { error: 'non pronto' });
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': fs.statSync(x.file).size }); return fs.createReadStream(x.file).pipe(res);
     }
     if (p.startsWith('/vita-video/')) {
       const [jid, id] = arg('/vita-video/').split('/');

@@ -41,6 +41,7 @@ for rel in ("app/src/main.c", "app/src/extra.inc", "app/src/updater.c"):
             print(f"  ATTENZIONE {rel}: letterale concatenato, da sistemare a mano: {content[:50]!r}"); continue
         line_start = src.rfind("\n", 0, a) + 1; line = src[line_start:src.find("\n", a)]
         if line.lstrip().startswith("#"): print(f"  salto (direttiva): {content[:50]!r}"); continue
+        if re.match(r"\s*static\s+const\s+char\s*\*\s*\w+\s*\[", line): continue   # elenchi statici: la traduzione si fa dove li si usa
         res.append(src[last:a]); res.append("T(" + src[a:b] + ")"); last = b; cnt += 1
     res.append(src[last:]); p.write_text("".join(res), encoding="utf-8"); total += cnt; print(f"{rel}: {cnt} frasi avvolte")
 print("totale:", total)

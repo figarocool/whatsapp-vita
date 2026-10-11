@@ -786,9 +786,26 @@ static void draw_sel_bar(void) {
   tline(24, 22, 44, 42, C_TEXT); tline(44, 22, 24, 42, C_TEXT); btn(0, 0, 70, HDR, B_SEL_CANCEL, 0);
   char cnt[64]; snprintf(cnt, sizeof cnt, T("%d selezionate"), nsel); textb(70, 18, C_TEXT, 22, cnt);
   int allpin = 1, allmute = 1; for (int i = 0; i < nsel; i++) { Chat *c = sel_chat(i); if (c) { if (!c->pinned) allpin = 0; if (!c->muted) allmute = 0; } }
-  const char *lab[4] = { allpin ? T("Stacca") : T("Fissa"), allmute ? T("Riattiva") : T("Silenzia"), show_archived ? T("Ripristina") : T("Archivia"), T("Elimina") }; int ids[4] = { B_SEL_PIN, B_SEL_MUTE, B_SEL_ARCH, B_SEL_DEL };
-  int x = SW - 14;
-  for (int i = 3; i >= 0; i--) { int w = tw(17, lab[i]) + 34; x -= w; rrect(x, (HDR - 40) / 2, w, 40, 20, i == 3 ? RGBA8(0xE5, 0x39, 0x35, 255) : C_BG); text(x + 17, (HDR - 40) / 2 + 10, i == 3 ? C_WHITE : C_TEXT, 17, lab[i]); btn(x, (HDR - 40) / 2, w, 40, ids[i], 0); x -= 8; }
+  // icone al posto delle scritte, come nell'app ufficiale: puntina, campanella, archivio, cestino
+  int ids[4] = { B_SEL_PIN, B_SEL_MUTE, B_SEL_ARCH, B_SEL_DEL }; const int bw = 58, cy = HDR / 2; int x = SW - 10 - 4 * bw;
+  for (int i = 0; i < 4; i++) {
+    int cx = x + i * bw + bw / 2; unsigned col = i == 3 ? RGBA8(0xE5, 0x39, 0x35, 255) : C_TEXT;
+    if (i == 0) {   // puntina (barrata se le chat sono gia' fissate)
+      vita2d_draw_rectangle(cx - 7, cy - 12, 14, 4, col); vita2d_draw_rectangle(cx - 4, cy - 8, 8, 10, col); vita2d_draw_rectangle(cx - 9, cy + 1, 18, 3, col); vita2d_draw_rectangle(cx - 1, cy + 4, 2, 9, col);
+      if (allpin) { tline(cx - 11, cy + 12, cx + 11, cy - 12, C_BAR); tline(cx - 11, cy + 13, cx + 11, cy - 11, col); tline(cx - 12, cy + 12, cx + 10, cy - 12, col); }
+    } else if (i == 1) {   // campanella (barrata = silenzia, intera = riattiva)
+      vita2d_draw_fill_circle(cx, cy - 3, 8, col); vita2d_draw_rectangle(cx - 8, cy - 3, 16, 9, col); vita2d_draw_rectangle(cx - 11, cy + 6, 22, 3, col); vita2d_draw_fill_circle(cx, cy + 12, 3, col);
+      if (!allmute) { tline(cx - 11, cy + 12, cx + 11, cy - 12, C_BAR); tline(cx - 11, cy + 13, cx + 11, cy - 11, col); tline(cx - 12, cy + 12, cx + 10, cy - 12, col); }
+    } else if (i == 2) {   // archivio: scatola con freccia (verso l'alto se si ripristina)
+      vita2d_draw_rectangle(cx - 12, cy - 11, 24, 7, col); vita2d_draw_rectangle(cx - 10, cy - 4, 20, 15, col);
+      if (show_archived) { tline(cx, cy + 6, cx, cy - 2, C_BAR); tline(cx - 4, cy + 2, cx, cy - 2, C_BAR); tline(cx + 4, cy + 2, cx, cy - 2, C_BAR); }
+      else { tline(cx, cy - 2, cx, cy + 6, C_BAR); tline(cx - 4, cy + 2, cx, cy + 6, C_BAR); tline(cx + 4, cy + 2, cx, cy + 6, C_BAR); }
+    } else {   // cestino
+      vita2d_draw_rectangle(cx - 4, cy - 13, 8, 3, col); vita2d_draw_rectangle(cx - 11, cy - 10, 22, 3, col); vita2d_draw_rectangle(cx - 9, cy - 6, 18, 18, col);
+      vita2d_draw_rectangle(cx - 5, cy - 3, 2, 12, C_BAR); vita2d_draw_rectangle(cx + 3, cy - 3, 2, 12, C_BAR); vita2d_draw_rectangle(cx - 1, cy - 3, 2, 12, C_BAR);
+    }
+    btn(x + i * bw, 0, bw, HDR, ids[i], 0);
+  }
 }
 static void sel_chatmod(const char *more, const char *toast) { for (int i = 0; i < nsel; i++) fire_jid("/chatmod", selj[i], more, i == nsel - 1 ? toast : ""); }
 

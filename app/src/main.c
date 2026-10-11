@@ -163,7 +163,8 @@ static int xfer_dl_cb(unsigned long long done, unsigned long long total) { xfer.
 // anteprima video in-app (storie e chat): il bridge converte, l'app scarica in cache e lo riproduce con SceAvPlayer
 static struct { char key[260]; char path[300]; volatile int gen, state, pct, phase, opened, audio; } vp;
 static void aud_toggle(const char *jid, const char *id); static int aud_state(const char *jid, const char *id, int *pct, int *secs);   // audio in chat (in extra.inc)   // state: 0 niente, 1 preparo, 2 pronto, 3 errore; phase: 0 WhatsApp, 1 conversione, 2 download
-static int vp_dl_cb(unsigned long long done, unsigned long long total) { vp.pct = total ? (int)(100 * done / total) : 0; return 0; }
+static __thread int vp_job_gen;
+static int vp_dl_cb(unsigned long long done, unsigned long long total) { vp.pct = total ? (int)(100 * done / total) : 0; return vp_job_gen != vp.gen; }   // annulla se nel frattempo si e' passati ad altro
 static void vp_cachefile(const char *id, int audio, char *out, size_t n) { char s[48]; snprintf(s, sizeof s, "%.40s", id); for (char *p = s; *p; p++) if (*p == '/' || *p == ':' || *p == '\\' || *p == '=') *p = '_'; snprintf(out, n, "ux0:data/whatsapp/cache/V_%s.%s", s, audio ? "mp3" : "mp4"); }
 // la cache dei video/audio resta fra un avvio e l'altro: si cancella solo il piu' vecchio quando supera 150 MB
 static void vp_cache_wipe(void) {
@@ -366,7 +367,7 @@ static void run_job(Job *j, const char *base) {
       prep_done: break;
     }
     case J_VPREP: {
-      int gen = atoi(j->extra); char e[500], e2b[200], key[64] = "", cf[300], part[310];
+      int gen = atoi(j->extra); vp_job_gen = gen; char e[500], e2b[200], key[64] = "", cf[300], part[310];
       url_enc(j->jid, e, sizeof e); url_enc(j->id, e2b, sizeof e2b); vp_cachefile(j->id, !strcmp(j->kind, "audio"), cf, sizeof cf); snprintf(part, sizeof part, "%s.part", cf);
       snprintf(url, sizeof url, "%s/prep/%s/%s?kind=%s", base, e, e2b, !strcmp(j->kind, "audio") ? "audio" : "video");
       { char *r = NULL; size_t rl = 0; int rc = http_get_t(url, &r, &rl, 20); jv *v = (rc == 0 && r) ? json_parse(r) : NULL; free(r); if (v) { snprintf(key, sizeof key, "%s", json_str(v, "key", "")); json_free(v); } }
@@ -442,6 +443,18 @@ static void scan_bridge(void) {
   scan_pct = -1;
 }
 
+// video/audio/file: attendono la conversione sul bridge anche per minuti, quindi hanno un thread proprio (la coda resta libera)
+typedef struct { Job j; char base[256]; } LongJob;
+static volatile int long_jobs;
+static void *long_job_main(void *a) { LongJob *lj = a; run_job(&lj->j, lj->base); free(lj); __sync_fetch_and_sub(&long_jobs, 1); return NULL; }
+static void spawn_long_job(const Job *j, const char *base) {
+  if (__sync_fetch_and_add(&long_jobs, 1) >= 4) { __sync_fetch_and_sub(&long_jobs, 1); if (j->type == J_PREP) { xfer.active = 0; toast_set(T("Occupato, riprova")); } return; }
+  LongJob *lj = malloc(sizeof *lj); if (!lj) { __sync_fetch_and_sub(&long_jobs, 1); return; }
+  lj->j = *j; snprintf(lj->base, sizeof lj->base, "%s", base);
+  pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 512 * 1024); pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+  pthread_t th; if (pthread_create(&th, &at, long_job_main, lj) != 0) { free(lj); __sync_fetch_and_sub(&long_jobs, 1); }
+  pthread_attr_destroy(&at);
+}
 static void *worker(void *arg) {
   (void)arg;
   unsigned tick = 0, last_scan = 0;
@@ -454,6 +467,7 @@ static void *worker(void *arg) {
       if (njobs == 0) { pthread_mutex_unlock(&mu); break; }
       j = jobs[0]; memmove(&jobs[0], &jobs[1], sizeof(Job) * (njobs - 1)); njobs--;
       pthread_mutex_unlock(&mu);
+      if (j.type == J_VPREP || j.type == J_PREP) { spawn_long_job(&j, base); continue; }   // le attese lunghe (conversione) non devono bloccare la coda
       run_job(&j, base);
     }
 
@@ -1415,7 +1429,8 @@ int main(void) {
             int apct = 0, asec = 0, ast = aud_state(chats[cur_chat].jid, m->id, &apct, &asec);   // 0 fermo, 1 preparo, 2 in riproduzione, 3 errore
             vita2d_draw_fill_circle(cx0 + 20, cy + 21, 18, ast == 3 ? C_RED : C_GREEN); text((int)cx0 + 15, (int)cy + 8, C_WHITE, 22, ast == 2 ? "||" : ast == 1 ? "..." : ">");
             { float tw_ = m->w - 2 * pad - 60; vita2d_draw_rectangle(cx0 + 50, cy + 20, tw_, 3, C_SUB); if (ast == 2 && m->dur > 0) { float f = (float)asec / m->dur; if (f > 1) f = 1; vita2d_draw_rectangle(cx0 + 50, cy + 20, tw_ * f, 3, C_GREEN); } else if (ast == 1) vita2d_draw_rectangle(cx0 + 50, cy + 20, tw_ * apct / 100.0f, 3, C_GREEN); }
-            char du[24]; snprintf(du, sizeof du, "%d:%02d", m->dur / 60, m->dur % 60); text((int)cx0 + 50, (int)cy + 26, C_SUB, 13, du); cy += HVOICE + 2;
+            char du[24]; snprintf(du, sizeof du, "%d:%02d", m->dur / 60, m->dur % 60); text((int)cx0 + 50, (int)cy + 26, C_SUB, 13, du);
+            btn((int)cx0, (int)cy, m->w - 2 * pad, HVOICE, B_MSG, i + 1000); cy += HVOICE + 2;   // tocco = play/stop
           }
           for (int k = 0; k < m->nlines; k++) text((int)(bx + pad), (int)(cy + k * LH), m->kind == K_DELETED ? C_SUB : C_TEXT, BFONT, m->lines[k]);
           // ora + spunte

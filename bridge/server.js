@@ -376,9 +376,11 @@ const preps = new Map();   // chiave -> { state: download|convert|ready|error, p
 const sha1hex = (t) => require('crypto').createHash('sha1').update(t).digest('hex');
 const VITA_VF = "scale=w='min(960,iw)':h='min(544,ih)':force_original_aspect_ratio=decrease:force_divisible_by=16,format=yuv420p";
 function probeDuration(file) { return new Promise((res) => require('child_process').execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { timeout: 20000 }, (e, so) => res(e ? 0 : parseFloat(so) || 0))); }
-function runFfmpeg(args, durSec, onPct) {
+function runFfmpeg(args, durSec, onPct, bg, holder) {
   return new Promise((resolve, reject) => {
-    const cp = require('child_process').spawn('ffmpeg', [...args, '-progress', 'pipe:1', '-nostats', '-loglevel', 'error'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const fa = [...args, '-progress', 'pipe:1', '-nostats', '-loglevel', 'error'];
+    const cp = bg ? require('child_process').spawn('nice', ['-n', '10', 'ffmpeg', ...fa], { stdio: ['ignore', 'pipe', 'pipe'] }) : require('child_process').spawn('ffmpeg', fa, { stdio: ['ignore', 'pipe', 'pipe'] });
+    if (holder) holder.cp = cp;
     let err = '', buf = '';
     cp.stderr.on('data', (d) => { err = (err + d).slice(-300); });
     cp.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); const m = /^out_time_(?:us|ms)=(\d+)/.exec(line); if (m && durSec > 0) onPct(Math.min(99, Math.round(100 * Number(m[1]) / 1e6 / durSec))); } });
@@ -386,10 +388,15 @@ function runFfmpeg(args, durSec, onPct) {
     cp.on('close', (c) => { clearTimeout(t); c === 0 ? resolve() : reject(new Error('ffmpeg: ' + err)); });
   });
 }
-function prepStart(jid, id, kind) {
+function prepStart(jid, id, kind, bg) {
   const key = sha1hex(jid + '|' + id + '|' + kind), old = preps.get(key);
+  // se l'utente chiede un file che sta convertendo in background a bassa priorita', si ferma e si rifa' a priorita' normale
+  if (old && old.bg && !bg) {
+    old.bg = false;   // da ora ha la priorita' dell'utente
+    if (old.state === 'convert' && old.cp) { old.restarting = true; try { old.cp.kill('SIGKILL'); } catch (_) {} return key; }   // il catch qui sotto lo riavvia a priorita' normale
+  }
   if (old && old.state !== 'error' && !(old.state === 'ready' && !fs.existsSync(old.file))) return key;
-  const p = { state: 'download', pct: 0, file: '', ext: kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : 'bin', size: 0, err: '' }; preps.set(key, p);
+  const p = { state: 'download', pct: 0, file: '', ext: kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : 'bin', size: 0, err: '', bg: !!bg, cp: null }; preps.set(key, p);
   (async () => {
     const out = path.join(VIDEO_DIR, key + '.' + p.ext), src = path.join(VIDEO_DIR, key + '.src'), tmp = path.join(VIDEO_DIR, key + '.tmp.' + p.ext); const t0 = Date.now();
     try {
@@ -402,10 +409,13 @@ function prepStart(jid, id, kind) {
         const args = kind === 'video'
           ? ['-y', '-i', src, '-vf', VITA_VF, '-c:v', 'libx264', '-profile:v', 'main', '-level', '3.1', '-preset', 'veryfast', '-crf', '26', '-maxrate', '2500k', '-bufsize', '5000k', '-r', '30', '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp]
           : ['-y', '-i', src, '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-ac', '2', '-ar', '44100', tmp];
-        await runFfmpeg(args, dur, (v) => { p.pct = v; }); fs.renameSync(tmp, out);
+        await runFfmpeg(args, dur, (v) => { p.pct = v; }, p.bg, p); fs.renameSync(tmp, out);
       }
       p.file = out; p.size = fs.statSync(out).size; p.pct = 100; p.state = 'ready'; log('preparato', kind, 'in', Date.now() - t0, 'ms:', p.size, 'byte');
-    } catch (e) { p.state = 'error'; p.err = String(e.message || e).slice(0, 120); log('preparazione fallita', kind, p.err); }
+    } catch (e) {
+      if (p.restarting) { preps.delete(key); prepStart(jid, id, kind, false); return; }
+      p.state = 'error'; p.err = String(e.message || e).slice(0, 120); log('preparazione fallita', kind, p.err);
+    }
     finally { for (const f of [src, tmp]) { try { fs.unlinkSync(f); } catch (_) {} } }
   })();
   return key;
@@ -420,7 +430,7 @@ function bgPrep(jid, id) {
 }
 function bgNext() {
   if (bgBusy || !bgQueue.length) return; bgBusy = true; const [jid, id, key] = bgQueue.shift();
-  prepStart(jid, id, 'video'); const t = setInterval(() => { const x = preps.get(key); if (!x || x.state === 'ready' || x.state === 'error') { clearInterval(t); bgBusy = false; bgNext(); } }, 500);
+  prepStart(jid, id, 'video', true); const t = setInterval(() => { const x = preps.get(key); if (!x || x.state === 'ready' || x.state === 'error') { clearInterval(t); bgBusy = false; bgNext(); } }, 500);
 }
 // Le foto si preparano in anticipo (download da WhatsApp + riduzione) con al massimo 2 lavori alla volta; una richiesta che arriva
 // mentre la stessa foto e' gia' in preparazione si accoda a quella invece di rifare tutto.

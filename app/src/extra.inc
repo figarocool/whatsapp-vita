@@ -414,7 +414,7 @@ static void draw_viewer(void) {
   text(SW / 2 - 130, 14, RGBA8(200, 200, 200, 255), 15, T("Tocca fuori dai pulsanti o premi Cerchio per chiudere"));
 }
 
-enum { A_CLOSE = 1, A_NEW_GROUP, A_VIEW_CONTACT, A_SEARCH, A_MEDIA, A_MUTE_MENU, A_MUTE_8H, A_MUTE_1W, A_MUTE_ALWAYS, A_UNMUTE, A_DIS_MENU, A_DIS_OFF, A_DIS_24H, A_DIS_7D, A_DIS_90D, A_THEME_MENU, A_MORE, A_BLOCK, A_UNBLOCK, A_CLEAR, A_DELETE, A_EXPORT, A_ARCHIVE, A_DO_BLOCK, A_DO_CLEAR, A_DO_DELETE, A_LIST_ARCHIVED, A_LIST_PROFILE, A_LOGOUT, A_DO_LOGOUT, A_QUIT, A_INSTALL_PROBES, A_TOGGLE_SCALE, A_ABOUT_CUSTOM, A_REACT_VIEW, A_TOGGLE_UI, A_STORY_TEXT, A_STORY_PHOTO, A_TOGGLE_RECEIPTS, A_UNFOLLOW, A_DO_UNFOLLOW, A_INSTALL_PLUGIN, A_DECLINE_PLUGIN, A_REBOOT, A_TOGGLE_NOTIF, A_UNINSTALL_PLUGIN, A_DO_UNINSTALL, A_COMM_GROUP, A_COMM_RENAME, A_COMM_DESC, A_COMM_LEAVE, A_DO_COMM_LEAVE, A_UPD_NOW, A_UPD_LATER, A_UPD_ERR, A_UPD_RETRY, A_SEL_MUTE_8H, A_SEL_MUTE_1W, A_SEL_MUTE_ALWAYS, A_SEL_DO_DELETE, A_THEME_BASE = 100, A_STORY_COL_BASE = 200, A_ABOUT_BASE = 300, A_REACT_BASE = 400 };
+enum { A_CLOSE = 1, A_NEW_GROUP, A_VIEW_CONTACT, A_SEARCH, A_MEDIA, A_MUTE_MENU, A_MUTE_8H, A_MUTE_1W, A_MUTE_ALWAYS, A_UNMUTE, A_DIS_MENU, A_DIS_OFF, A_DIS_24H, A_DIS_7D, A_DIS_90D, A_THEME_MENU, A_MORE, A_BLOCK, A_UNBLOCK, A_CLEAR, A_DELETE, A_EXPORT, A_ARCHIVE, A_DO_BLOCK, A_DO_CLEAR, A_DO_DELETE, A_LIST_ARCHIVED, A_LIST_PROFILE, A_LOGOUT, A_DO_LOGOUT, A_QUIT, A_INSTALL_PROBES, A_TOGGLE_SCALE, A_ABOUT_CUSTOM, A_REACT_VIEW, A_TOGGLE_UI, A_STORY_TEXT, A_STORY_PHOTO, A_TOGGLE_RECEIPTS, A_UNFOLLOW, A_DO_UNFOLLOW, A_INSTALL_PLUGIN, A_DECLINE_PLUGIN, A_REBOOT, A_TOGGLE_NOTIF, A_UNINSTALL_PLUGIN, A_DO_UNINSTALL, A_COMM_GROUP, A_COMM_RENAME, A_COMM_DESC, A_COMM_LEAVE, A_DO_COMM_LEAVE, A_UPD_NOW, A_UPD_LATER, A_UPD_ERR, A_UPD_RETRY, A_TOGGLE_ENGINE, A_SEL_MUTE_8H, A_SEL_MUTE_1W, A_SEL_MUTE_ALWAYS, A_SEL_DO_DELETE, A_THEME_BASE = 100, A_STORY_COL_BASE = 200, A_ABOUT_BASE = 300, A_REACT_BASE = 400 };
 static void popup_begin(const char *title); static void popup_add(const char *label, int act, int red);
 // ---------- installazione plugin notifiche (taiHEN) ----------
 #define PLUGIN_LINE "ur0:tai/wa_notify.suprx"
@@ -565,6 +565,16 @@ static void popup_act(int act) {
     case A_MUTE_MENU: popup_begin(T("Silenzia notifiche")); popup_add(T("8 ore"), A_MUTE_8H, 0); popup_add(T("1 settimana"), A_MUTE_1W, 0); popup_add(T("Sempre"), A_MUTE_ALWAYS, 0); break;
     case A_MUTE_8H: case A_MUTE_1W: case A_MUTE_ALWAYS: case A_UNMUTE:
       if (c) { long long ms = act == A_MUTE_8H ? 28800000LL : act == A_MUTE_1W ? 604800000LL : act == A_MUTE_ALWAYS ? 3153600000000LL : 0; snprintf(more, sizeof more, ",\"action\":\"mute\",\"until\":%lld", ms); fire_jid("/chatmod", c->jid, more, act == A_UNMUTE ? T("Notifiche riattivate") : T("Chat silenziata")); c->muted = act != A_UNMUTE; } break;
+    case A_TOGGLE_ENGINE: {
+      if (!strncmp(base_url, "engine:", 7)) {   // passa a un bridge sul PC: si ricorda l'ultimo indirizzo usato, altrimenti si chiede
+        char ext[256] = ""; SceUID f = sceIoOpen("ux0:data/whatsapp/bridge_ext.txt", SCE_O_RDONLY, 0); if (f >= 0) { int n = sceIoRead(f, ext, sizeof ext - 1); sceIoClose(f); if (n > 0) ext[n] = 0; for (char *p = ext; *p; p++) if (*p == '\n' || *p == '\r') *p = 0; }
+        if (ext[0]) { pthread_mutex_lock(&mu); snprintf(base_url, sizeof base_url, "%s", ext); pthread_mutex_unlock(&mu); save_base_url(ext); toast_set(T("Bridge sul PC attivo: riapri l'app")); }
+        else { ime_open(IME_BRIDGE, T("Indirizzo del bridge (es. http://192.168.1.10:8787)"), "http://"); }
+      } else {
+        SceUID f = sceIoOpen("ux0:data/whatsapp/bridge_ext.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (f >= 0) { sceIoWrite(f, base_url, strlen(base_url)); sceIoClose(f); }
+        pthread_mutex_lock(&mu); snprintf(base_url, sizeof base_url, "engine://local"); pthread_mutex_unlock(&mu); save_base_url("engine://local"); engine_start(); toast_set(T("Motore interno attivo"));
+      }
+      break; }
     case A_SEL_MUTE_8H: case A_SEL_MUTE_1W: case A_SEL_MUTE_ALWAYS: { long long ms = act == A_SEL_MUTE_8H ? 28800000LL : act == A_SEL_MUTE_1W ? 604800000LL : 3153600000000LL; snprintf(more, sizeof more, ",\"action\":\"mute\",\"until\":%lld", ms); sel_chatmod(more, T("Fatto")); for (int i = 0; i < nsel; i++) { Chat *sc = sel_chat(i); if (sc) sc->muted = 1; } nsel = 0; break; }
     case A_SEL_DO_DELETE: sel_chatmod(",\"action\":\"delete\"", T("Fatto")); nsel = 0; break;
     case A_DIS_MENU: popup_begin(T("Messaggi effimeri")); popup_add(T("Disattivati"), A_DIS_OFF, 0); popup_add(T("24 ore"), A_DIS_24H, 0); popup_add(T("7 giorni"), A_DIS_7D, 0); popup_add(T("90 giorni"), A_DIS_90D, 0); break;

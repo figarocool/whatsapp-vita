@@ -1,5 +1,5 @@
 // Sostituto del modulo 'fs' di Node, appoggiato alla parte nativa.
-import { Readable } from 'stream';
+import { Readable, Writable } from 'stream';
 const N = globalThis.__nat;
 const err = (code, msg, p) => { const e = new Error(`${code}: ${msg}${p ? ", '" + p + "'" : ''}`); e.code = code; return e; };
 const dec = (r, o, p) => { if (r === null) throw err('ENOENT', 'no such file or directory', p); const b = Buffer.from(r); const e = typeof o === 'string' ? o : o && o.encoding; return e ? b.toString(e) : b; };
@@ -19,7 +19,11 @@ export function createReadStream(p, o = {}) {
   let off = o.start || 0; const end = o.end === undefined ? Infinity : o.end + 1; const CH = o.highWaterMark || 65536; const path = String(p);
   return new Readable({ read() { const n = Math.min(CH, end - off); if (n <= 0) return this.push(null); const b = N.fsReadRange(path, off, n); if (b === null) return this.destroy(err('ENOENT', 'no such file or directory', path)); if (!b.byteLength) return this.push(null); off += b.byteLength; this.push(Buffer.from(b)); } });
 }
-export const createWriteStream = () => { throw new Error('createWriteStream non ancora disponibile su Vita'); };
+export function createWriteStream(p, o = {}) {
+  const path = String(p); if (!(o.flags && String(o.flags).startsWith('a'))) N.fsWrite(path, Buffer.alloc(0));
+  const w = new Writable({ write(chunk, enc, cb) { if (!N.fsAppend(path, typeof chunk === 'string' ? Buffer.from(chunk, enc) : chunk)) return cb(err('EIO', 'scrittura fallita', path)); cb(); } });
+  w.path = path; w.bytesWritten = 0; return w;
+}
 export class WriteStream {}
 const cb = (f) => async (...a) => f(...a);
 export const promises = {

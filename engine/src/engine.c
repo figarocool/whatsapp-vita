@@ -20,6 +20,7 @@
 #include <dirent.h>
 #include <zlib.h>
 #include <pthread.h>
+#include <malloc.h>
 #include "mbedtls/md.h"
 #include "mbedtls/cipher.h"
 #include "mbedtls/ssl.h"
@@ -590,6 +591,7 @@ static void report_exception(JSContext *ctx, const char *where) {
 }
 static void drain_jobs(Engine *e) { JSContext *c1; int r; while ((r = JS_ExecutePendingJob(e->rt, &c1)) != 0) { if (r < 0) report_exception(c1, "job"); } }
 int eng_loop_step(Engine *e, int max_wait_ms) {
+  { static long long last_mem; long long t = now_ms(); if (t - last_mem > 30000) { last_mem = t; JSMemoryUsage mu; JS_ComputeMemoryUsage(e->rt, &mu); struct mallinfo mi = mallinfo(); elog("memoria motore: JS %.1f MB (%lld oggetti, %lld stringhe); heap totale in uso %.1f MB", mu.malloc_size / 1048576.0, (long long)mu.obj_count, (long long)mu.str_count, mi.uordblks / 1048576.0); } }
   drain_jobs(e); tcp_service(e); rq_pump(e); if (!JS_IsUndefined(rq_handler) && max_wait_ms > 10) max_wait_ms = 10;   // con il gestore attivo si controlla la coda spesso
   long long now = now_ms(); Timer *best = NULL; for (Timer *t = e->timers; t; t = t->next) if (!best || t->due < best->due) best = t;
   long long wait = max_wait_ms; if (best) { long long d = best->due - now; if (d < 0) d = 0; if (d < wait) wait = d; }

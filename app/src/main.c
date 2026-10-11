@@ -31,7 +31,7 @@
 #include "json.h"
 #include "net.h"
 
-int _newlib_heap_size_user = 210 * 1024 * 1024;
+int _newlib_heap_size_user = 170 * 1024 * 1024;
 
 // ---- scala dell'interfaccia: testo, foto, avatar e distanze crescono insieme ----
 // Il codice di disegno ragiona in "unita' logiche"; ogni funzione grafica le moltiplica per UK (scala attuale).
@@ -423,10 +423,9 @@ static void run_job(Job *j, const char *base) {
 }
 
 static void save_base_url(const char *u) {
-  int eng = !strncmp(u, "engine:", 7);
+  if (!strncmp(u, "engine:", 7)) return;   // motore interno: non si tocca nessun file di configurazione
   SceUID f = sceIoOpen("ux0:data/whatsapp/config.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
   if (f >= 0) { sceIoWrite(f, u, strlen(u)); sceIoWrite(f, "\n", 1); sceIoClose(f); }
-  if (eng) { sceIoRemove("ur0:tai/wa_config.txt"); return; }   // con il motore interno il plugin non ha un bridge da interrogare
   f = sceIoOpen("ur0:tai/wa_config.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);   // copia per il plugin: sta in ur0:tai come i file degli altri plugin
   if (f >= 0) { sceIoWrite(f, u, strlen(u)); sceIoWrite(f, "\n", 1); sceIoClose(f); }
 }
@@ -1098,12 +1097,13 @@ static char sel_path[300], sel_kind[12], caption[1000];
 static vita2d_texture *prev_tex;
 
 static void load_config(void) {
-  SceUID f = sceIoOpen("ux0:data/whatsapp/config.txt", SCE_O_RDONLY, 0);
+  // L'app usa sempre il motore WhatsApp interno. Solo per sviluppo: se esiste use_bridge.txt con un indirizzo http, si usa quel bridge. config.txt non si legge piu'.
+  SceUID f = sceIoOpen("ux0:data/whatsapp/use_bridge.txt", SCE_O_RDONLY, 0);
   if (f < 0) return;
   char b[256] = ""; int n = sceIoRead(f, b, sizeof b - 1); sceIoClose(f);
   if (n <= 0) return; b[n] = 0;
   for (char *p = b; *p; p++) if (*p == '\n' || *p == '\r' || *p == ' ') { *p = 0; break; }
-  if (b[0]) { while (strlen(b) > 1 && b[strlen(b) - 1] == '/') b[strlen(b) - 1] = 0; snprintf(base_url, sizeof base_url, "%s", b); save_base_url(base_url); }   // riscrive anche la copia in ur0:tai per il plugin
+  if (!strncmp(b, "http", 4)) { while (strlen(b) > 1 && b[strlen(b) - 1] == '/') b[strlen(b) - 1] = 0; snprintf(base_url, sizeof base_url, "%s", b); }
 }
 static int ext_is(const char *n, const char *list) { const char *d = strrchr(n, '.'); if (!d) return 0; char e[12]; int i = 0; for (d++; *d && i < 10; d++) e[i++] = (*d >= 'A' && *d <= 'Z') ? *d + 32 : *d; e[i] = 0; char t[100]; snprintf(t, sizeof t, ",%s,", e); char l[100]; snprintf(l, sizeof l, ",%s,", list); return strstr(l, t) != NULL; }
 static const char *kind_for(const char *name) { return ext_is(name, "jpg,jpeg,png,gif,bmp,webp") ? "image" : ext_is(name, "mp4,mov,m4v,3gp") ? "video" : ext_is(name, "mp3,ogg,m4a,aac,wav,opus") ? "audio" : "doc"; }

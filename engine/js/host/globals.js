@@ -9,7 +9,7 @@ globalThis.Buffer = Buffer;
   Buffer.from = function (v, enc, len) { if (typeof v === 'string' && enc === 'base64url') { let t = v.replace(/-/g, '+').replace(/_/g, '/'); while (t.length % 4) t += '='; return fr.call(Buffer, t, 'base64'); } return fr.call(Buffer, v, enc, len); };
   Buffer.isEncoding = (e) => e === 'base64url' || isEnc.call(Buffer, e);
 }
-if (!globalThis.process) globalThis.process = { env: {}, platform: 'linux', versions: { node: '20.0.0' }, version: 'v20.0.0', nextTick: (f, ...a) => Promise.resolve().then(() => f(...a)), emitWarning() {}, on() {}, off() {}, cwd: () => '/', hrtime: Object.assign(() => { const t = globalThis.__nat.mono(); return [Math.floor(t / 1000), (t % 1000) * 1e6]; }, { bigint: () => BigInt(Math.floor(globalThis.__nat.mono() * 1e6)) }) };
+if (!globalThis.process) globalThis.process = { env: {}, platform: 'linux', versions: { node: null }, version: 'v20.0.0', nextTick: (f, ...a) => Promise.resolve().then(() => f(...a)), emitWarning() {}, on() {}, off() {}, cwd: () => '/', hrtime: Object.assign(() => { const t = globalThis.__nat.mono(); return [Math.floor(t / 1000), (t % 1000) * 1e6]; }, { bigint: () => BigInt(Math.floor(globalThis.__nat.mono() * 1e6)) }) };
 if (!Error.captureStackTrace) { Error.captureStackTrace = (o) => { try { o.stack = new Error().stack; } catch (_) {} }; Error.stackTraceLimit = 10; }
 // i timer di Node sono oggetti (con unref/ref/refresh): avvolgiamo quelli nativi
 {

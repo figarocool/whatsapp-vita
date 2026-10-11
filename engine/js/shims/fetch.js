@@ -40,6 +40,7 @@ async function fetchInner(input, opts = {}, hops = 0, rel = () => {}) {
       id = N.httpRequest(method, url, headers, body, (ev, a, b) => {
         if (ev === 'headers') {
           if ([301, 302, 303, 307, 308].includes(a) && b.location && hops < 5) { done = true; N.httpAbort(id); const next = new URL(b.location, url).toString(); rel(); return resolve(fetch(next, (a === 303 ? { ...opts, method: 'GET', body: undefined } : opts), hops + 1)); }
+          if (a >= 400) console.log('fetch: stato', a, url.slice(0, 90));
           done = true; resolve(new Response(a, b, rs, url));
         } else if (ev === 'data') rs.push(Buffer.from(a));
         else if (ev === 'end') { rs.push(null); rel(); }

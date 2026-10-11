@@ -69,8 +69,18 @@ static void wrap_text(const char *s, int x, int y, int w, int size, unsigned col
 
 // ---------- schede in basso ----------
 static int is_tab(int s) { return s == S_LIST || s == S_UPDATES || s == S_COMM || s == S_CALLS; }
+// selezione con i tasti direzionali negli altri tab (Aggiornamenti, Community, Chiamate): ogni riga si registra con selrow()
+typedef struct { int id, arg; } SelRow;
+static SelRow srows[900]; static int nsr, tsel, tnav, tsel_dirty; static float sel_top, sel_vh;
+static void sel_begin(float top) { nsr = 0; sel_top = top; sel_vh = SH - top - TABH; }
+static void selrow(float y, float h, int id, int arg) {
+  if (nsr >= 900) return; int i = nsr++; srows[i].id = id; srows[i].arg = arg;
+  if (!tnav || i != tsel) return;
+  if (tsel_dirty) { tsel_dirty = 0; misc_vel = 0; float rel = y + misc_scroll - sel_top; if (rel < misc_scroll) misc_scroll = rel; else if (rel + h > misc_scroll + sel_vh) misc_scroll = rel + h - sel_vh; }
+  vita2d_draw_rectangle(0, y, SW, h, RGBA8(0x2B, 0x7B, 0xFF, 64)); vita2d_draw_rectangle(0, y, 6, h, RGBA8(0x2B, 0x7B, 0xFF, 255));   // riga selezionata: azzurro come nella lista chat
+}
 static void goto_tab(int i) {
-  misc_scroll = 0; misc_vel = 0; menu_open = 0;
+  tsel = 0; tnav = 0; tsel_dirty = 0; misc_scroll = 0; misc_vel = 0; menu_open = 0;
   if (i == 0) screen = S_LIST;
   else if (i == 1) { screen = S_UPDATES; query("updates", "/updates"); query2("mystatus", "/mystatus"); my_q_frame = frame_no; }
   else if (i == 2) { screen = S_COMM; query("comm", "/communities"); }
@@ -135,9 +145,10 @@ static void draw_updates(void) {
   float top = HDR + 4, total = 0; for (int i = 0; i < nur; i++) total += urows[i].type == U_LABEL ? 34 : ROWH;
   misc_clamp(total, SH - top - TABH);
   vita2d_enable_clipping(); vita2d_set_clip_rectangle(0, top, SW, SH - TABH); clip_y0 = top; clip_y1 = SH - TABH;
-  float y = top - misc_scroll;
+  float y = top - misc_scroll; sel_begin(top);
   for (int r = 0; r < nur; r++) {
     int h = urows[r].type == U_LABEL ? 34 : ROWH;
+    { URow *s_ = &urows[r]; if (s_->type == U_MY) selrow(y, h, B_UPD_MY, 0); else if (s_->type == U_CONTACT) selrow(y, h, B_UPD_ROW, s_->idx); else if (s_->type == U_CHANNEL) selrow(y, h, B_ROW, s_->idx); else if (s_->type == U_FOLLOW) selrow(y, h, B_FOLLOW_CH, 0); }
     if (y + h >= top && y <= SH) {
       URow *u = &urows[r];
       if (u->type == U_LABEL) { const char *lb[4] = { T("Stato"), T("Recenti"), T("Visti"), T("Canali") }; label_row(y, lb[u->idx]); }
@@ -209,12 +220,14 @@ static void draw_comm(void) {
   if (a) for (int i = 0; i < a->count; i++) { jv *g = json_get(a->items[i], "groups"); rows += 1 + (g ? g->count : 0); }
   misc_clamp(rows * 64, SH - top - TABH);
   vita2d_enable_clipping(); vita2d_set_clip_rectangle(0, top, SW, SH - TABH); clip_y0 = top; clip_y1 = SH - TABH;
-  float y = top - misc_scroll;
+  float y = top - misc_scroll; sel_begin(top);
   if (a) for (int i = 0; i < a->count; i++) {
     jv *c = a->items[i]; jv *g = json_get(c, "groups");
+    selrow(y, 64, B_COMM_HEAD, i);
     if (y + 64 >= top && y <= SH) { rrect(24, y + 8, 48, 48, 14, hash_col(json_str(c, "subject", ""))); char sub[60]; snprintf(sub, sizeof sub, "%d membri", (int)json_num(c, "size", 0)); char nm[200]; fit(json_str(c, "subject", ""), 640, 20, nm, sizeof nm); text(88, (int)y + 8, C_TEXT, 20, nm); text(88, (int)y + 36, C_SUB, 14, sub); btn(0, (int)y, SW, 64, B_COMM_HEAD, i); }
     y += 64;
     for (int k = 0; g && k < g->count; k++) {
+      selrow(y, 64, B_COMM_ROW, i * 100 + k);
       if (y + 64 >= top && y <= SH) { char nm[200]; fit(json_str(g->items[k], "subject", ""), 600, 18, nm, sizeof nm); draw_avatar(json_str(g->items[k], "id", ""), nm, 120, y + 32, 20); text(156, (int)y + 20, C_TEXT, 18, nm); btn(0, (int)y, SW, 64, B_COMM_ROW, i * 100 + k); }
       y += 64;
     }
@@ -233,8 +246,9 @@ static void draw_calls(void) {
   jv *a = qarr("calls"); float top = HDR + 30; int n = a ? a->count : 0;
   misc_clamp(n * ROWH, SH - top - TABH);
   vita2d_enable_clipping(); vita2d_set_clip_rectangle(0, top, SW, SH - TABH); clip_y0 = top; clip_y1 = SH - TABH;
+  sel_begin(top);
   for (int i = 0; i < n; i++) {
-    float y = top + i * ROWH - misc_scroll; if (y + ROWH < top || y > SH) continue;
+    float y = top + i * ROWH - misc_scroll; selrow(y, ROWH, B_CALL_ROW, i); if (y + ROWH < top || y > SH) continue;
     jv *o = a->items[i]; const char *s = json_str(o, "status", "");
     const char *st = !strcmp(s, "timeout") ? T("Persa") : !strcmp(s, "reject") ? T("Rifiutata") : !strcmp(s, "accept") ? T("Risposta") : !strcmp(s, "terminate") ? T("Terminata") : T("In arrivo");
     char sub[96], tm[16]; int dur = (int)json_num(o, "dur", 0); char ds[16] = ""; if (dur > 0) snprintf(ds, sizeof ds, " (%d:%02d)", dur / 60, dur % 60); snprintf(sub, sizeof sub, "%s%s - %s%s", json_bool(o, "out", 0) ? T("In uscita: ") : "", json_bool(o, "video", 0) ? T("Video") : T("Voce"), st, ds); fmt_ago((long)json_num(o, "ts", 0), tm, sizeof tm);
@@ -832,6 +846,7 @@ static int extra_back(void) {
 static void handle_extra(int id, int arg) {
   switch (id) {
     case B_TAB: goto_tab(arg); break;
+    case B_CALL_ROW: { jv *a = qarr("calls"); if (a && arg < a->count) open_by_jid(json_str(a->items[arg], "jid", "")); break; }
     case B_LOGOUT: popup_act(A_LOGOUT); break;
     case B_BRIDGE_ADDR: ime_open(IME_BRIDGE, T("Indirizzo bridge (es. http://192.168.1.59:8787)"), base_url); break;
     case B_PLUGIN: popup_act(plugin_installed() ? A_TOGGLE_NOTIF : A_INSTALL_PLUGIN); plugin_cache = -1; break;

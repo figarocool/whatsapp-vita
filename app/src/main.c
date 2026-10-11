@@ -983,7 +983,7 @@ static void layout_msg(Msg *m, int maxbw, int showname) {
 // ======================================================================
 // pulsanti dichiarati durante il disegno e risolti a fine frame
 // ======================================================================
-enum { B_NONE, B_ROW, B_CHIP, B_PROFILE, B_BACK, B_MSG, B_EMOJI_BTN, B_SEND, B_ATTACH, B_DRAFT, B_EMO_CELL, B_EMO_BACK, B_EMO_CLOSE, B_MENU_REACT, B_MENU_ITEM, B_MENU_CLOSE, B_VIEW_CLOSE, B_PICK_ENTRY, B_PICK_UP, B_PREVIEW_SEND, B_PREVIEW_CAPTION, B_PREVIEW_CANCEL, B_PROF_NAME, B_PROF_ABOUT, B_PROF_PHOTO, B_CANCEL_REPLY, B_TAB, B_FAB, B_SEARCH_ICON, B_LISTMENU, B_CHATMENU, B_HEADER_INFO, B_POPUP_ITEM, B_POPUP_CLOSE, B_UNBLOCK_BAR, B_SEARCH_BOX, B_SEARCH_ROW, B_NC_GROUP, B_NC_CONTACT, B_NC_ROW, B_GR_SUBJECT, B_GR_ROW, B_GR_CREATE, B_CT_BLOCK, B_MEDIA_TAB, B_MEDIA_ITEM, B_DOC_ITEM, B_UPD_ROW, B_COMM_ROW, B_ST_PREV, B_ST_NEXT, B_LOGOUT, B_PLUGIN, B_PLUGIN_RM, B_BRIDGE_ADDR, B_THEME_UI, B_UPD_MY, B_STORY_NEW, B_FOLLOW_CH, B_ST_VIEWERS, B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT, B_NOTIF_TEST, B_PLUGIN_DIAG , B_CAM_OPEN, B_CAM_SHOT, B_CAM_FLIP, B_COMM_NEW, B_COMM_HEAD, B_UPD_CHECK, B_UPD_CANCEL, B_UPD_BLOCK, B_LANG, B_LANG_ROW, B_XFER_CANCEL, B_ST_SAVE};
+enum { B_NONE, B_ROW, B_CHIP, B_PROFILE, B_BACK, B_MSG, B_EMOJI_BTN, B_SEND, B_ATTACH, B_DRAFT, B_EMO_CELL, B_EMO_BACK, B_EMO_CLOSE, B_MENU_REACT, B_MENU_ITEM, B_MENU_CLOSE, B_VIEW_CLOSE, B_PICK_ENTRY, B_PICK_UP, B_PREVIEW_SEND, B_PREVIEW_CAPTION, B_PREVIEW_CANCEL, B_PROF_NAME, B_PROF_ABOUT, B_PROF_PHOTO, B_CANCEL_REPLY, B_TAB, B_FAB, B_SEARCH_ICON, B_LISTMENU, B_CHATMENU, B_HEADER_INFO, B_POPUP_ITEM, B_POPUP_CLOSE, B_UNBLOCK_BAR, B_SEARCH_BOX, B_SEARCH_ROW, B_NC_GROUP, B_NC_CONTACT, B_NC_ROW, B_GR_SUBJECT, B_GR_ROW, B_GR_CREATE, B_CT_BLOCK, B_MEDIA_TAB, B_MEDIA_ITEM, B_DOC_ITEM, B_UPD_ROW, B_COMM_ROW, B_ST_PREV, B_ST_NEXT, B_LOGOUT, B_PLUGIN, B_PLUGIN_RM, B_BRIDGE_ADDR, B_THEME_UI, B_UPD_MY, B_STORY_NEW, B_FOLLOW_CH, B_ST_VIEWERS, B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT, B_NOTIF_TEST, B_PLUGIN_DIAG , B_CAM_OPEN, B_CAM_SHOT, B_CAM_FLIP, B_COMM_NEW, B_COMM_HEAD, B_UPD_CHECK, B_UPD_CANCEL, B_UPD_BLOCK, B_LANG, B_LANG_ROW, B_XFER_CANCEL, B_ST_SAVE, B_CALL_ROW};
 typedef struct { int x, y, w, h, id, arg; } Btn;
 static Btn btns[400]; static int nb; static int clip_y0 = 0, clip_y1 = 100000;
 static void btn(int x, int y, int w, int h, int id, int arg) {
@@ -1283,6 +1283,10 @@ int main(void) {
         int dir = 0; if (pressed & SCE_CTRL_UP) dir = -1; if (pressed & SCE_CTRL_DOWN) dir = 1;
         if (pad.buttons & (SCE_CTRL_UP | SCE_CTRL_DOWN)) { dpad_hold++; if (dpad_hold > 16 && dpad_hold % 4 == 0) dir = (pad.buttons & SCE_CTRL_UP) ? -1 : 1; } else dpad_hold = 0;   // tenendo premuto si ripete
         if (dir && !popup_open && !menu_open) { if (!nav_mode) nav_mode = 1; else list_sel += dir; list_sel_dirty = 1; }
+      } else if (screen == S_UPDATES || screen == S_COMM || screen == S_CALLS) {   // come la lista chat: croce = seleziona, X = apri
+        int dir = 0; if (pressed & SCE_CTRL_UP) dir = -1; if (pressed & SCE_CTRL_DOWN) dir = 1;
+        if (pad.buttons & (SCE_CTRL_UP | SCE_CTRL_DOWN)) { dpad_hold++; if (dpad_hold > 16 && dpad_hold % 4 == 0) dir = (pad.buttons & SCE_CTRL_UP) ? -1 : 1; } else dpad_hold = 0;
+        if (dir && !popup_open && !menu_open && !viewer_open) { if (!tnav) tnav = 1; else tsel += dir; tsel_dirty = 1; if (tsel >= nsr) tsel = nsr - 1; if (tsel < 0) tsel = 0; }
       } else { if (pad.buttons & SCE_CTRL_UP) stick -= 10; if (pad.buttons & SCE_CTRL_DOWN) stick += 10; }
       if (stick != 0) { if (screen == S_LIST) list_scroll += stick; else if (screen == S_CHAT) { if (emoji_open) emo_scroll += stick; else { chat_scroll += stick; chat_stick = 0; } } else if (screen == S_PICKER) pick_scroll += stick; else if (screen > S_PREVIEW) misc_scroll += stick; }
     }
@@ -1688,6 +1692,9 @@ int main(void) {
       int ch_ro = screen == S_CHAT && cur_chat >= 0 && cur_chat < nchats && chats[cur_chat].channel;
       if ((pressed & SCE_CTRL_CROSS) && screen == S_CHAT && !ch_ro && !menu_open && !viewer_open) ime_open(IME_DRAFT, T("Scrivi un messaggio"), draft);
       if ((pressed & SCE_CTRL_CROSS) && screen == S_LIST && !popup_open && !menu_open) { if (nav_mode && nvis > 0 && list_sel < nvis) open_chat(visible_idx[list_sel]); else { nav_mode = 1; list_sel_dirty = 1; } }
+      if ((pressed & SCE_CTRL_CROSS) && (screen == S_UPDATES || screen == S_COMM || screen == S_CALLS) && !popup_open && !menu_open && !viewer_open) {
+        if (tnav && tsel < nsr) { int sid = srows[tsel].id, sarg = srows[tsel].arg; if (sid == B_ROW) open_chat(sarg); else handle_extra(sid, sarg); } else { tnav = 1; tsel_dirty = 1; }
+      }
       if (screen == S_STATUSVIEW && !popup_open && (pressed & (SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER | SCE_CTRL_LEFT | SCE_CTRL_RIGHT))) st_step((pressed & (SCE_CTRL_RTRIGGER | SCE_CTRL_RIGHT)) ? 1 : -1);   // storie: R1/destra avanti, L1/sinistra indietro
       if (is_tab(screen) && !popup_open && !menu_open && !viewer_open && ((pressed & SCE_CTRL_LTRIGGER) || (pressed & SCE_CTRL_RTRIGGER))) {
         // tappe: 0 Tutte, 1 Non lette, 2 Gruppi, 3 Aggiornamenti, 4 Community, 5 Chiamate. R1 = avanti, L1 = indietro

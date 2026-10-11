@@ -58,7 +58,7 @@ struct Engine {
   HHandle hh[MAXH]; CHandle ch[MAXH]; WS ws[MAXWS];
 };
 static Engine *G;
-static volatile const char *g_stage = "avvio"; static volatile unsigned g_beat;
+static volatile const char *g_stage = "avvio"; static volatile unsigned g_beat; static volatile long long g_beat_ms; static char *status_cache; static pthread_mutex_t sc_mu = PTHREAD_MUTEX_INITIALIZER;
 const char *eng_stage(void) { return (const char *)g_stage; } unsigned eng_beat(void) { return g_beat; }
 #define STAGE(s) (g_stage = (s))
 
@@ -245,11 +245,16 @@ static JSValue js_audio_to_wav(JSContext *ctx, JSValueConst this_val, int argc, 
 static JSValue js_video_playable(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   size_t n = 0; uint8_t *in = get_bytes(ctx, argv[0], &n); if (!in) return JS_FALSE; return JS_NewBool(ctx, video_mp4_playable(in, n));
 }
+static JSValue js_mp4_info(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  size_t n = 0; uint8_t *in = get_bytes(ctx, argv[0], &n); Mp4Info mi; if (!in || video_mp4_info(in, n, &mi) != 0) return JS_NULL;
+  JSValue o = JS_NewObject(ctx); JS_SetPropertyStr(ctx, o, "codec", JS_NewString(ctx, mi.codec)); JS_SetPropertyStr(ctx, o, "width", JS_NewInt32(ctx, mi.width)); JS_SetPropertyStr(ctx, o, "height", JS_NewInt32(ctx, mi.height)); JS_SetPropertyStr(ctx, o, "profile", JS_NewInt32(ctx, mi.profile)); JS_SetPropertyStr(ctx, o, "level", JS_NewInt32(ctx, mi.level)); return o;
+}
 static JSValue js_fs_copy(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {   // copia a blocchi (video grandi)
   const char *a = JS_ToCString(ctx, argv[0]), *b = JS_ToCString(ctx, argv[1]); int ok = 0; if (a && b) { FILE *f = fopen(a, "rb"), *g = fopen(b, "wb"); if (f && g) { unsigned char *buf = malloc(65536); size_t k; ok = 1; while ((k = fread(buf, 1, 65536, f)) > 0) if (fwrite(buf, 1, k, g) != k) { ok = 0; break; } free(buf); } if (f) fclose(f); if (g) fclose(g); }
   JS_FreeCString(ctx, a); JS_FreeCString(ctx, b); return JS_NewBool(ctx, ok);
 }
 
+static JSValue js_set_status(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) { const char *s = JS_ToCString(ctx, argv[0]); if (!s) return JS_EXCEPTION; pthread_mutex_lock(&sc_mu); free(status_cache); status_cache = strdup(s); pthread_mutex_unlock(&sc_mu); JS_FreeCString(ctx, s); return JS_UNDEFINED; }
 static JSValue js_crc32(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) { size_t n = 0; uint8_t *p = get_bytes(ctx, argv[0], &n); if (!p && n) return JS_ThrowTypeError(ctx, "serve un buffer"); return JS_NewUint32(ctx, (uint32_t)crc32(crc32(0L, Z_NULL, 0), p ? p : (const Bytef *)"", (uInt)n)); }
 // ---------- zlib ----------
 static JSValue js_zlib(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic) {   // magic 0 = inflate, 1 = deflate
@@ -518,6 +523,11 @@ static JSValue js_respond(JSContext *ctx, JSValueConst this_val, int argc, JSVal
   return JS_TRUE;
 }
 int eng_request(Engine *e, const char *method, const char *url, const char *headers_json, const void *body, size_t blen, int timeout_ms, EngResponse *out) {
+  if (!strcmp(method, "GET") && (!strcmp(url, "/status") || !strncmp(url, "/status?", 8)) && g_beat_ms && now_ms() - g_beat_ms > 1500) {   // il JS e' occupato a calcolare: si risponde dalla copia dello stato, segnalando "occupato"
+    pthread_mutex_lock(&sc_mu); char *c = status_cache ? strdup(status_cache) : NULL; pthread_mutex_unlock(&sc_mu);
+    if (c && c[0] == '{') { size_t n = strlen(c) + 64; char *o = malloc(n); snprintf(o, n, "{\"busy\":true,\"busy_s\":%lld,%s", (now_ms() - g_beat_ms) / 1000, c + 1); free(c); memset(out, 0, sizeof *out); out->status = 200; out->body = (unsigned char *)o; out->len = strlen(o); out->headers_json = strdup("{\"content-type\":\"application/json\"}"); return 0; }
+    free(c);
+  }
   Req *r = calloc(1, sizeof *r); pthread_cond_init(&r->cv, NULL); r->method = strdup(method); r->url = strdup(url); r->headers = strdup(headers_json ? headers_json : "{}");
   if (blen) { r->body = malloc(blen); memcpy(r->body, body, blen); r->blen = blen; }
   memset(out, 0, sizeof *out);
@@ -597,7 +607,7 @@ static void report_exception(JSContext *ctx, const char *where) {
 }
 static void drain_jobs(Engine *e) { STAGE("esecuzione JS (promesse)"); JSContext *c1; int r; while ((r = JS_ExecutePendingJob(e->rt, &c1)) != 0) { if (r < 0) report_exception(c1, "job"); } }
 int eng_loop_step(Engine *e, int max_wait_ms) {
-  g_beat++; STAGE("ciclo eventi");
+  g_beat++; g_beat_ms = now_ms(); STAGE("ciclo eventi");
   { static long long last_mem; long long t = now_ms(); if (t - last_mem > 30000) { last_mem = t; JSMemoryUsage mu; JS_ComputeMemoryUsage(e->rt, &mu); struct mallinfo mi = mallinfo(); elog("memoria motore: JS %.1f MB (%lld oggetti, %lld stringhe); heap totale in uso %.1f MB", mu.malloc_size / 1048576.0, (long long)mu.obj_count, (long long)mu.str_count, mi.uordblks / 1048576.0); } }
   drain_jobs(e); tcp_service(e); rq_pump(e); if (!JS_IsUndefined(rq_handler) && max_wait_ms > 10) max_wait_ms = 10;   // con il gestore attivo si controlla la coda spesso
   long long now = now_ms(); Timer *best = NULL; for (Timer *t = e->timers; t; t = t->next) if (!best || t->due < best->due) best = t;
@@ -679,9 +689,9 @@ Engine *eng_new(const char *cacert_path, const char *data_dir, EngineLog log) {
   FN("fsRead", js_fs_read, 1); FN("fsWrite", js_fs_write, 2); FN("fsUnlink", js_fs_unlink, 1); FN("fsMkdir", js_fs_mkdir, 1); FN("fsExists", js_fs_exists, 1); FN("fsList", js_fs_list, 1); FN("fsStat", js_fs_stat, 1); FN("fsRename", js_fs_rename, 2); FN("fsAppend", js_fs_append, 2); FN("fsReadRange", js_fs_read_range, 3);
   JS_SetPropertyStr(ctx, nat, "inflate", JS_NewCFunctionMagic(ctx, (JSCFunctionMagic *)js_zlib, "inflate", 1, JS_CFUNC_generic_magic, 0)); JS_SetPropertyStr(ctx, nat, "deflate", JS_NewCFunctionMagic(ctx, (JSCFunctionMagic *)js_zlib, "deflate", 1, JS_CFUNC_generic_magic, 1));
   FN("curveKeypair", js_curve_keypair, 1); FN("curveShared", js_curve_shared, 2); FN("curveSign", js_curve_sign, 3); FN("curveVerify", js_curve_verify, 3);
-  FN("audioToWav", js_audio_to_wav, 1); FN("videoPlayable", js_video_playable, 1); FN("fsCopy", js_fs_copy, 2);
+  FN("audioToWav", js_audio_to_wav, 1); FN("videoPlayable", js_video_playable, 1); FN("mp4Info", js_mp4_info, 1); FN("fsCopy", js_fs_copy, 2);
   FN("imgConvert", js_img_convert, 7); FN("imgInfo", js_img_info, 1);
-  FN("crc32", js_crc32, 1);
+  FN("crc32", js_crc32, 1); FN("setStatusCache", js_set_status, 1);
   FN("setHandler", js_set_handler, 1); FN("respond", js_respond, 5);
   FN("httpRequest", js_http_request, 5); FN("httpAbort", js_http_abort, 1);
   FN("wsOpen", js_ws_open, 3); FN("wsSend", js_ws_send, 3); FN("wsClose", js_ws_close, 1);

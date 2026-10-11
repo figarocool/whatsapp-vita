@@ -27,7 +27,15 @@ const sync = { active: false, progress: 0, t: 0 };
 let B = null;                 // modulo baileys (import dinamico)
 let sock;
 const chats = new Map();      // jid -> {jid,name,last,ts,unread}
-const raws = new Map();       // jid -> Map(id -> WAMessage)
+const ENGINE = typeof globalThis.__nat !== 'undefined';   // dentro la Vita: tutto piu' lento, quindi niente lavori inutili all'avvio
+// Le chat si leggono dal disco solo quando servono (aprire la chat, scaricare un media...): all'avvio si caricano solo i metadati
+const lazyChats = new Set();
+class LazyRaws extends Map {
+  get(k) { if (lazyChats.has(k)) loadChatFile(k); return super.get(k); }
+  has(k) { return lazyChats.has(k) || super.has(k); }
+  *[Symbol.iterator]() { loadAllLazy(); yield* super[Symbol.iterator](); }
+}
+const raws = new LazyRaws();       // jid -> Map(id -> WAMessage)
 const reacts = new Map();     // `${jid}|${id}` -> Map(sender -> emoji)
 const names = new Map();      // jid -> name
 const presence = new Map();   // jid -> {state, ts}
@@ -132,7 +140,7 @@ function view(m) {
   };
 }
 
-function rawList(jid) { if (!raws.has(jid)) raws.set(jid, new Map()); return raws.get(jid); }
+function rawList(jid) { if (lazyChats.has(jid)) loadChatFile(jid); if (!raws.has(jid)) raws.set(jid, new Map()); return raws.get(jid); }
 
 function handleProtocol(m) {
   const x = m.message || {};
@@ -208,13 +216,13 @@ function addMessage(m, live) {
 const STORE_OLD = path.join(DATA, 'store.json');
 const STORE_DIR = path.join(DATA, 'store'); fs.mkdirSync(STORE_DIR, { recursive: true });
 const META = path.join(STORE_DIR, 'meta.json');
-const dirtyChats = new Set(); let dirtyMeta = false;
+const dirtyChats = new Set(); let dirtyMeta = false, lastMetaSave = 0;
 const chatFile = (jid) => path.join(STORE_DIR, 'c_' + Buffer.from(jid).toString('base64url') + '.json');
 function writeAtomic(file, text) { fs.writeFileSync(file + '.tmp', text); fs.renameSync(file + '.tmp', file); }
 function saveStore(all = false) {
   if (!B) return; const t0 = Date.now(); let n = 0;
   try {
-    if (dirtyMeta) { dirtyMeta = false; writeAtomic(META, JSON.stringify({ chats: [...chats.values()], names: [...names.entries()], pnames: [...pnames.entries()], alias: [...alias.entries()], viewers: [...statusViewers.entries()].map(([k, v]) => [k, [...v.entries()]]) })); }
+    if (dirtyMeta && (all || !ENGINE || Date.now() - lastMetaSave > 60000)) { dirtyMeta = false; lastMetaSave = Date.now(); writeAtomic(META, JSON.stringify({ chats: [...chats.values()], names: [...names.entries()], pnames: [...pnames.entries()], alias: [...alias.entries()], viewers: [...statusViewers.entries()].map(([k, v]) => [k, [...v.entries()]]) })); }
     for (const jid of [...dirtyChats]) {
       if (!all && n >= 15) break;               // al massimo 15 chat per giro: niente picchi di memoria/CPU
       dirtyChats.delete(jid); const list = raws.get(jid);
@@ -225,6 +233,15 @@ function saveStore(all = false) {
     if (Date.now() - t0 > 1500) log('salvataggio lento:', Date.now() - t0, 'ms,', n, 'chat');
   } catch (e) { log('salvataggio fallito:', e.message); }
 }
+function loadChatFile(jid) {
+  lazyChats.delete(jid);
+  try {
+    const p = chatFile(jid); if (!fs.existsSync(p)) return;
+    const o = JSON.parse(fs.readFileSync(p, 'utf8'), B.BufferJSON.reviver); const m = new Map(); Map.prototype.set.call(raws, jid, m);
+    for (const x of o.msgs || []) m.set(x.key.id, x); for (const [k, v] of o.reacts || []) reacts.set(k, new Map(v));
+  } catch (e) { log('file chat illeggibile', jid, e.message); }
+}
+function loadAllLazy() { for (const jid of [...lazyChats]) loadChatFile(jid); }
 function loadStore() {
   try {
     if (fs.existsSync(STORE_OLD) && !fs.existsSync(META)) {      // migrazione dal vecchio file unico
@@ -239,10 +256,7 @@ function loadStore() {
     let files = 0;
     for (const f of fs.readdirSync(STORE_DIR)) {
       if (!f.startsWith('c_') || !f.endsWith('.json')) continue;
-      try {
-        const o = JSON.parse(fs.readFileSync(path.join(STORE_DIR, f), 'utf8'), B.BufferJSON.reviver); const m = rawList(o.jid);
-        for (const x of o.msgs || []) m.set(x.key.id, x); for (const [k, v] of o.reacts || []) reacts.set(k, new Map(v)); files++;
-      } catch (e) { log('file chat illeggibile', f, e.message); }
+      try { lazyChats.add(Buffer.from(f.slice(2, -5), 'base64url').toString('utf8')); files++; } catch (_) {}
     }
     log('store caricato:', chats.size, 'chat,', files, 'file');
   } catch (e) { log('lettura store fallita:', e.message); }
@@ -568,7 +582,7 @@ http.createServer(async (req, res) => {
       return json(res, 200, list.slice(-n).map((m) => { const v = view(m); if (m.__views) v.views = Number(m.__views); if (m.__reactions?.length) v.reactions = m.__reactions; if (v.text && v.text.length > 1800) v.text = v.text.slice(0, 1800) + '...'; return v; }));
     }
     if (p.startsWith('/messages/')) {
-      const jid = arg('/messages/'); prefetchChat(jid, 12);
+      const jid = arg('/messages/'); prefetchChat(jid, ENGINE ? 4 : 12);
       const list = [...(raws.get(jid)?.values() || [])].sort((a, b) => num(a.messageTimestamp) - num(b.messageTimestamp));
       const nlim = Math.min(300, parseInt(q.get('n') || '30', 10)); return json(res, 200, list.slice(-nlim).map((m) => { const v = view(m); if (v.text && v.text.length > 1800) v.text = v.text.slice(0, 1800) + '...'; return v; }));
     }
@@ -907,5 +921,6 @@ require('net').createServer((sock) => {
 
 // Dopo l'avvio si preparano le ultime foto delle chat piu' recenti, cosi' la prima apertura sulla Vita non deve aspettare.
 setTimeout(() => {
+  if (ENGINE) return;   // dentro la Vita le foto si scaricano solo quando servono
   try { [...chats.values()].filter((c) => !c.archived).sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 25).forEach((c) => prefetchChat(c.jid, 6)); log('precaricamento foto delle chat recenti avviato'); } catch (e) { log('precaricamento foto:', e.message); }
 }, 60000);

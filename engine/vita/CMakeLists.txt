@@ -18,3 +18,9 @@ set(BUNDLE "${CMAKE_CURRENT_SOURCE_DIR}/../js/engine.min.js" CACHE FILEPATH "bun
 vita_create_vpk(waengine_test.vpk ${VITA_TITLEID} waengine_test.self VERSION "01.00" NAME "${VITA_APP_NAME}"
   FILE ${BUNDLE} assets/engine.bundle.js
   FILE ${CMAKE_CURRENT_SOURCE_DIR}/../../app/assets/cacert.pem assets/cacert.pem)
+
+add_executable(curve_bench bench.c curve_old.c ../src/curve25519.c)
+target_include_directories(curve_bench PRIVATE ../src)
+target_link_libraries(curve_bench mbedcrypto SceKernelThreadMgr_stub SceLibKernel_stub)
+vita_create_self(curve_bench.self curve_bench UNSAFE)
+vita_create_vpk(curve_bench.vpk WAENG0002 curve_bench.self VERSION "01.00" NAME "Curve bench")

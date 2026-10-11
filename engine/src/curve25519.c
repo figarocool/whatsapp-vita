@@ -2,7 +2,7 @@
 #include "curve25519.h"
 #include <string.h>
 #include "mbedtls/sha512.h"
-typedef int64_t i64; typedef uint64_t u64; typedef uint8_t u8; typedef i64 gf[16];
+typedef int64_t i64; typedef uint64_t u64; typedef uint8_t u8; typedef int32_t gf[16];   // limbi a 32 bit: i prodotti diventano una sola istruzione smlal sul processore a 32 bit della Vita
 #define FOR(i, n) for (i = 0; i < (n); ++i)
 static const gf gf0 = { 0 }, gf1 = { 1 }, _121665 = { 0xdb41, 1 };
 static const gf D = { 0x78a3, 0x1359, 0x4dca, 0x75eb, 0xd8ab, 0x4141, 0x0a4d, 0x0070, 0xe898, 0x7779, 0x4079, 0x8cc7, 0xfe73, 0x2b6f, 0x6cee, 0x5203 };
@@ -13,8 +13,8 @@ static const gf I = { 0xa0b0, 0x4a0e, 0x1b27, 0xc4ee, 0xe478, 0xad2f, 0x1806, 0x
 static const u64 L[32] = { 0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10 };
 
 static void set25519(gf r, const gf a) { int i; FOR(i, 16) r[i] = a[i]; }
-static void car25519(gf o) { int i; i64 c; FOR(i, 16) { o[i] += (1LL << 16); c = o[i] >> 16; o[(i + 1) * (i < 15)] += c - 1 + 37 * (c - 1) * (i == 15); o[i] -= c << 16; } }
-static void sel25519(gf p, gf q, int b) { i64 t, c = ~(b - 1); int i; FOR(i, 16) { t = c & (p[i] ^ q[i]); p[i] ^= t; q[i] ^= t; } }
+static void car25519(gf o) { int i; for (i = 0; i < 16; i++) { int64_t v = (int64_t)o[i] + (1LL << 16); int64_t c = v >> 16; o[(i + 1) * (i < 15)] += (int32_t)(c - 1 + 37 * (c - 1) * (i == 15)); o[i] = (int32_t)(v - (c << 16)); } }
+static void sel25519(gf p, gf q, int b) { int32_t t, c = ~(b - 1); int i; FOR(i, 16) { t = c & (p[i] ^ q[i]); p[i] ^= t; q[i] ^= t; } }
 static int vn(const u8 *x, const u8 *y, int n) { uint32_t d = 0; int i; FOR(i, n) d |= x[i] ^ y[i]; return (1 & ((d - 1) >> 8)) - 1; }
 static int verify32(const u8 *x, const u8 *y) { return vn(x, y, 32); }
 static void pack25519(u8 *o, const gf n) { int i, j, b; gf m, t; FOR(i, 16) t[i] = n[i]; car25519(t); car25519(t); car25519(t);
@@ -25,12 +25,16 @@ static u8 par25519(const gf a) { u8 d[32]; pack25519(d, a); return d[0] & 1; }
 static void unpack25519(gf o, const u8 *n) { int i; FOR(i, 16) o[i] = n[2 * i] + ((i64)n[2 * i + 1] << 8); o[15] &= 0x7fff; }
 static void A(gf o, const gf a, const gf b) { int i; FOR(i, 16) o[i] = a[i] + b[i]; }
 static void Z(gf o, const gf a, const gf b) { int i; FOR(i, 16) o[i] = a[i] - b[i]; }
-static void M(gf o, const gf a, const gf b) { i64 i, j, t[31]; FOR(i, 31) t[i] = 0; FOR(i, 16) FOR(j, 16) t[i + j] += a[i] * b[j]; FOR(i, 15) t[i] += 38 * t[i + 16]; FOR(i, 16) o[i] = t[i]; car25519(o); car25519(o); }
+static void M(gf o, const gf a, const gf b) {
+  i64 i, j, t[31]; FOR(i, 31) t[i] = 0; FOR(i, 16) FOR(j, 16) t[i + j] += (i64)a[i] * b[j]; FOR(i, 15) t[i] += 38 * t[i + 16];
+  for (int pass = 0; pass < 2; pass++) for (i = 0; i < 16; i++) { t[i] += (1LL << 16); i64 c = t[i] >> 16; t[(i + 1) * (i < 15)] += c - 1 + 37 * (c - 1) * (i == 15); t[i] -= c << 16; }   // riporti nei 64 bit, poi si torna a 32
+  FOR(i, 16) o[i] = (int32_t)t[i];
+}
 static void S(gf o, const gf a) { M(o, a, a); }
 static void inv25519(gf o, const gf i) { gf c; int a; FOR(a, 16) c[a] = i[a]; for (a = 253; a >= 0; a--) { S(c, c); if (a != 2 && a != 4) M(c, c, i); } FOR(a, 16) o[a] = c[a]; }
 static void pow2523(gf o, const gf i) { gf c; int a; FOR(a, 16) c[a] = i[a]; for (a = 250; a >= 0; a--) { S(c, c); if (a != 1) M(c, c, i); } FOR(a, 16) o[a] = c[a]; }
 static void scalarmult_mont(u8 *q, const u8 *n, const u8 *p) {
-  u8 z[32]; i64 x[80], r, i; gf a, b, c, d, e, f; FOR(i, 31) z[i] = n[i]; z[31] = (n[31] & 127) | 64; z[0] &= 248; unpack25519(x, p);
+  u8 z[32]; int32_t x[80]; i64 r, i; gf a, b, c, d, e, f; FOR(i, 31) z[i] = n[i]; z[31] = (n[31] & 127) | 64; z[0] &= 248; unpack25519(x, p);
   FOR(i, 16) { b[i] = x[i]; d[i] = a[i] = c[i] = 0; } a[0] = d[0] = 1;
   for (i = 254; i >= 0; --i) { r = (z[i >> 3] >> (i & 7)) & 1; sel25519(a, b, r); sel25519(c, d, r); A(e, a, c); Z(a, a, c); A(c, b, d); Z(b, b, d); S(d, e); S(f, a); M(a, c, a); M(c, b, e); A(e, a, c); Z(a, a, c); S(b, a); Z(c, d, f); M(a, c, _121665); A(a, a, d); M(c, c, a); M(a, d, f); M(d, b, x); S(b, e); sel25519(a, b, r); sel25519(c, d, r); }
   FOR(i, 16) { x[i + 16] = a[i]; x[i + 32] = c[i]; x[i + 48] = b[i]; x[i + 64] = d[i]; } inv25519(x + 32, x + 32); M(x + 16, x + 16, x + 32); pack25519(q, x + 16);
@@ -39,8 +43,25 @@ static void edadd(gf p[4], gf q[4]) { gf a, b, c, d, t, e, f, g, h; Z(a, p[1], p
 static void cswap(gf p[4], gf q[4], u8 b) { int i; FOR(i, 4) sel25519(p[i], q[i], b); }
 static void pack(u8 *r, gf p[4]) { gf tx, ty, zi; inv25519(zi, p[2]); M(tx, p[0], zi); M(ty, p[1], zi); pack25519(r, ty); r[31] ^= par25519(tx) << 7; }
 static void scalarmult_ed(gf p[4], gf q[4], const u8 *s) { int i; set25519(p[0], gf0); set25519(p[1], gf1); set25519(p[2], gf1); set25519(p[3], gf0); for (i = 255; i >= 0; --i) { u8 b = (s[i / 8] >> (i & 7)) & 1; cswap(p, q, b); edadd(q, p); edadd(p, p); cswap(p, q, b); } }
-static void scalarbase(gf p[4], const u8 *s) { gf q[4]; set25519(q[0], X); set25519(q[1], Y); set25519(q[2], gf1); M(q[3], X, Y); scalarmult_ed(p, q, s); }
-static void modL(u8 *r, i64 x[64]) { i64 carry, i, j; for (i = 63; i >= 32; --i) { carry = 0; for (j = i - 32; j < i - 12; ++j) { x[j] += carry - 16 * x[i] * (i64)L[j - (i - 32)]; carry = (x[j] + 128) >> 8; x[j] -= carry << 8; } x[j] += carry; x[i] = 0; }
+static gf (*BT)[16][4];   // BT[finestra][multiplo][coordinata]: tabella per la moltiplicazione del punto base (si calcola una volta sola)
+static void base_table_init(void) {
+#ifdef C25519_NO_TABLE
+  return;   // versione per il plugin: niente tabella da 256 KB, si usa la scala
+#endif
+  if (BT) return; gf (*t)[16][4] = malloc(sizeof(gf) * 4 * 16 * 64); if (!t) return; gf P[4], Q[4]; set25519(P[0], X); set25519(P[1], Y); set25519(P[2], gf1); M(P[3], X, Y);
+  for (int w = 0; w < 64; w++) {
+    set25519(t[w][0][0], gf0); set25519(t[w][0][1], gf1); set25519(t[w][0][2], gf1); set25519(t[w][0][3], gf0);   // 0*P = punto neutro
+    for (int k = 0; k < 4; k++) set25519(t[w][1][k], P[k]);
+    for (int j = 2; j < 16; j++) { for (int k = 0; k < 4; k++) set25519(Q[k], t[w][j - 1][k]); edadd(Q, P); for (int k = 0; k < 4; k++) set25519(t[w][j][k], Q[k]); }
+    for (int d = 0; d < 4; d++) edadd(P, P);   // P = 16 * P
+  }
+  BT = t;
+}
+static void scalarbase(gf p[4], const u8 *s) {
+  base_table_init(); if (!BT) { gf q[4]; set25519(q[0], X); set25519(q[1], Y); set25519(q[2], gf1); M(q[3], X, Y); scalarmult_ed(p, q, s); return; }
+  set25519(p[0], gf0); set25519(p[1], gf1); set25519(p[2], gf1); set25519(p[3], gf0);
+  for (int w = 0; w < 64; w++) { int nib = (s[w >> 1] >> ((w & 1) * 4)) & 15; if (nib) { gf q[4]; for (int k = 0; k < 4; k++) set25519(q[k], BT[w][nib][k]); edadd(p, q); } }
+}static void modL(u8 *r, i64 x[64]) { i64 carry, i, j; for (i = 63; i >= 32; --i) { carry = 0; for (j = i - 32; j < i - 12; ++j) { x[j] += carry - 16 * x[i] * (i64)L[j - (i - 32)]; carry = (x[j] + 128) >> 8; x[j] -= carry << 8; } x[j] += carry; x[i] = 0; }
   carry = 0; FOR(j, 32) { x[j] += carry - (x[31] >> 4) * (i64)L[j]; carry = x[j] >> 8; x[j] &= 255; } FOR(j, 32) x[j] -= carry * (i64)L[j]; FOR(i, 32) { x[i + 1] += x[i] >> 8; r[i] = x[i] & 255; } }
 static void reduce(u8 *r) { i64 x[64], i; FOR(i, 64) x[i] = (u64)r[i]; FOR(i, 64) r[i] = 0; modL(r, x); }
 static void hash512(u8 *out, const u8 *m, size_t n) { mbedtls_sha512(m, n, out, 0); }
@@ -50,8 +71,8 @@ static int unpackneg(gf r[4], const u8 p[32]) {
   if (par25519(r[0]) == (p[31] >> 7)) Z(r[0], gf0, r[0]); M(r[3], r[0], r[1]); return 0; }
 
 void c25519_keypair(const u8 seed[32], u8 pub[32], u8 priv[32]) {
-  u8 base[32] = { 9 }; memcpy(priv, seed, 32); scalarmult_mont(pub, priv, base);
-  priv[0] &= 248; priv[31] &= 127; priv[31] |= 64; pub[31] &= 127;
+  memcpy(priv, seed, 32); priv[0] &= 248; priv[31] &= 127; priv[31] |= 64;
+  gf p[4], num, den; scalarbase(p, priv); A(num, p[2], p[1]); Z(den, p[2], p[1]); inv25519(den, den); M(num, num, den); pack25519(pub, num); pub[31] &= 127;
 }
 void c25519_shared(u8 out[32], const u8 sk[32], const u8 pk[32]) { scalarmult_mont(out, sk, pk); }
 // firma come curve25519_sign di curve25519-js (rnd = 64 byte casuali oppure NULL). sig = 64 byte.

@@ -38,3 +38,16 @@ int video_mp4_playable(const uint8_t *in, size_t n) {
   int hevc = 0, avc = 0; for (size_t i = 0; i + 4 <= n; i++) { if (in[i] == 'h' && (!memcmp(in + i, "hvc1", 4) || !memcmp(in + i, "hev1", 4))) hevc = 1; else if (in[i] == 'a' && (!memcmp(in + i, "avc1", 4) || !memcmp(in + i, "avc3", 4))) avc = 1; }
   return hevc && !avc ? 0 : 1;
 }
+
+int video_mp4_info(const uint8_t *in, size_t n, Mp4Info *o) {
+  memset(o, 0, sizeof *o);
+  for (size_t i = 0; i + 40 < n; i++) {
+    int avc = !memcmp(in + i, "avc1", 4) || !memcmp(in + i, "avc3", 4), hev = !memcmp(in + i, "hvc1", 4) || !memcmp(in + i, "hev1", 4), vp = !memcmp(in + i, "vp09", 4) || !memcmp(in + i, "av01", 4);
+    if (!avc && !hev && !vp) continue;
+    { int z = 1; for (int k = 4; k < 10; k++) if (in[i + k]) z = 0; if (!z || in[i + 10] != 0 || in[i + 11] != 1) continue; }   // vale solo dentro 'stsd': a 'avc1' dei marchi iniziali (ftyp) mancano i 6 zeri di una vera voce
+    memcpy(o->codec, in + i, 4); o->codec[4] = 0; o->width = (in[i + 28] << 8) | in[i + 29]; o->height = (in[i + 30] << 8) | in[i + 31];   // VisualSampleEntry
+    for (size_t j = i + 30; j + 12 < n && j < i + 400; j++) if (!memcmp(in + j, "avcC", 4)) { o->profile = in[j + 5]; o->level = in[j + 7]; break; }
+    return 0;
+  }
+  return -1;
+}

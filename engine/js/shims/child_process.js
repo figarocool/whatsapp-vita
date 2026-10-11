@@ -14,7 +14,9 @@ function runFfmpeg(args) {   // ritorna { code, durationUs, err }
     if (r) { if (!N.fsWrite(out, r.data)) return { code: 1, err: 'scrittura fallita' }; return { code: 0, durationUs: Math.round(r.seconds * 1e6) }; }
     return N.fsCopy(src, out) ? { code: 0, durationUs: 0 } : { code: 1, err: 'copia fallita' };
   }
-  if (!N.videoPlayable(headTail(src, st.size))) return { code: 1, err: 'video HEVC: formato non supportato dalla Vita' };
+  const ht = headTail(src, st.size); const vi = N.mp4Info(ht);
+  console.log('video: ' + (vi ? `${vi.codec} ${vi.width}x${vi.height} profilo ${vi.profile} livello ${vi.level}` : 'formato non riconosciuto (non MP4?)') + ', ' + Math.round(st.size / 1024) + ' KB');
+  if (!N.videoPlayable(ht)) return { code: 1, err: 'video HEVC: formato non supportato dalla Vita' };
   return N.fsCopy(src, out) ? { code: 0, durationUs: 0 } : { code: 1, err: 'copia fallita' };
 }
 const argsOf = (cmd, args) => { if (cmd === 'nice') { const k = args.indexOf('ffmpeg'); return k >= 0 ? ['ffmpeg', args.slice(k + 1)] : [args[0], args.slice(1)]; } return [cmd, args]; };

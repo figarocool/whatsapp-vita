@@ -23,7 +23,13 @@ const plugin = { name: 'vita-node', setup(b) {
   b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: stub(a.path), loader: 'js' }));
   b.onResolve({ filter: /^whatsapp-rust-bridge$/ }, () => ({ path: S('wrb.js') }));
   b.onResolve({ filter: /^pino$/ }, () => ({ path: 'pino', namespace: 'pinostub' }));
-  b.onLoad({ filter: /.*/, namespace: 'pinostub' }, () => ({ contents: 'const mk = () => { const l = { level: "silent", child: () => mk(), trace(){}, debug(){}, info(){}, warn(){}, error(){}, fatal(){} }; return l; }; function pino() { return mk(); } pino.levels = {}; pino.default = pino; module.exports = pino;', loader: 'js' }));
+  b.onLoad({ filter: /.*/, namespace: 'pinostub' }, () => ({ contents: `
+    let n = 0; const N = globalThis.__nat; const t0 = N.mono();
+    const out = (lv) => (o, m) => { if (n++ > 600) return; const msg = typeof o === 'string' ? o : (m || ''); console.log('[wa ' + lv + ' +' + Math.round(N.mono() - t0) + 'ms] ' + msg + (o && o.err ? ' ' + (o.err.message || o.err) : '')); };
+    const mk = () => { const l = { level: 'info', child: () => mk(), trace(){}, debug(){}, info: out('i'), warn: out('w'), error: out('E'), fatal: out('F') }; return l; };
+    function pino() { return mk(); } pino.levels = {}; pino.default = pino; module.exports = pino;`, loader: 'js' }));
+  // meno chiavi di scambio iniziali: 812 sulla Vita richiedevano quasi un minuto di calcolo; ne bastano poche e si ricaricano quando scendono
+  b.onLoad({ filter: /Defaults[\\/]index\.js$/ }, (a) => ({ contents: fs.readFileSync(a.path, 'utf8').replace('INITIAL_PREKEY_COUNT = 812', 'INITIAL_PREKEY_COUNT = 100').replace('MIN_PREKEY_COUNT = 5', 'MIN_PREKEY_COUNT = 10'), loader: 'js', resolveDir: path.dirname(a.path) }));
   b.onLoad({ filter: /use-multi-file-auth-state\.js$/ }, (a) => ({ contents: fs.readFileSync(S('auth-state.js'), 'utf8'), loader: 'js', resolveDir: path.dirname(a.path) }));
   b.onResolve({ filter: /^qrcode$/ }, () => ({ path: S('qrcode.js') }));
   b.onResolve({ filter: /^curve25519-js$/ }, () => ({ path: curveShim }));

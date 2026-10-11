@@ -148,7 +148,7 @@ static char open_jid[160];
 static char pres_state[24], pres_jid[160];
 static char toast_txt[160]; static int toast_new;
 static volatile int quit_flag, poll_now;
-static int sync_active, sync_pct, sync_chats; static unsigned sync_t0;
+static int sync_active, sync_pct, sync_chats, eng_busy_s; static unsigned sync_t0;
 static volatile int scan_pct = -1;
 static int list_sel, nav_mode, list_sel_dirty, dpad_hold;   // selezione con i tasti direzionali nella lista chat
 static volatile int quit_req;
@@ -434,6 +434,7 @@ static Engine *g_engine; static pthread_t engine_th; static int engine_started;
 static void engine_log(const char *l) { crumb("motore: %s", l); }
 static void *engine_main(void *arg) {
   (void)arg; sceIoMkdir("ux0:data/whatsapp/engine", 0777);
+  scePowerSetArmClockFrequency(444); scePowerSetBusClockFrequency(222); scePowerSetGpuClockFrequency(222); scePowerSetGpuXbarClockFrequency(166);   // il motore e' molto piu' veloce a 444 MHz che ai 333 predefiniti
   g_engine = eng_new("app0:assets/cacert.pem", "ux0:data/whatsapp/engine", engine_log); net_set_engine(g_engine);
   if (eng_run_module(g_engine, "app0:assets/engine.qbc") == 0) while (!quit_flag && eng_loop_step(g_engine, 20) > 0) {}
   eng_shutdown(g_engine); crumb("motore fermo (chiavi salvate)"); return NULL;
@@ -493,7 +494,7 @@ static void *worker(void *arg) {
       pthread_mutex_lock(&mu);
       net_ok = 1;
       { char ns[24]; snprintf(ns, sizeof ns, "%s", json_str(j, "status", "?")); if (strcmp(ns, wa_status)) crumb("stato bridge: %s", ns); snprintf(wa_status, sizeof wa_status, "%s", ns); }
-      jv *sy = json_get(j, "sync"); int was = sync_active; sync_active = sy ? json_bool(sy, "active", 0) : 0; sync_pct = sy ? (int)json_num(sy, "progress", 0) : 0; sync_chats = sy ? (int)json_num(sy, "chats", 0) : 0;
+      eng_busy_s = json_bool(j, "busy", 0) ? (int)json_num(j, "busy_s", 1) + 1 : 0; jv *sy = json_get(j, "sync"); int was = sync_active; sync_active = sy ? json_bool(sy, "active", 0) : 0; sync_pct = sy ? (int)json_num(sy, "progress", 0) : 0; sync_chats = sy ? (int)json_num(sy, "chats", 0) : 0;
       if (sync_active && !was) { sync_t0 = frame_no; crumb("sync: INIZIO"); }
       if (!sync_active && was) crumb("sync: FINE");
       { static int lastp = -1; if (sync_active && sync_pct != lastp) { crumb("sync %d%% chat=%d", sync_pct, sync_chats); lastp = sync_pct; } }
@@ -1399,7 +1400,8 @@ int main(void) {
         int sy0 = SH - TABH - 34; vita2d_draw_rectangle(0, sy0, SW, 34, C_BAR);
         float frac = sync_pct / 100.0f; vita2d_draw_rectangle(0, sy0, SW, 4, C_DIV); vita2d_draw_rectangle(0, sy0, SW * frac + (sync_pct == 0 ? 40 : 0), 4, C_GREEN2);
         char sl[160]; unsigned el = (frame_no - sync_t0) / 60;
-        if (sync_pct >= 3) { unsigned eta = el * (100 - sync_pct) / sync_pct; snprintf(sl, sizeof sl, T("Sincronizzazione: %d%% - %d chat - restano circa %u:%02u"), sync_pct, sync_chats, eta / 60, eta % 60); }
+        if (eng_busy_s > 2) snprintf(sl, sizeof sl, T("Il motore sta elaborando i dati... (%d s)"), eng_busy_s);
+        else if (sync_pct >= 3) { unsigned eta = el * (100 - sync_pct) / sync_pct; snprintf(sl, sizeof sl, T("Sincronizzazione: %d%% - %d chat - restano circa %u:%02u"), sync_pct, sync_chats, eta / 60, eta % 60); }
         else snprintf(sl, sizeof sl, T("Sincronizzazione in corso... %d chat (trascorsi %u:%02u)"), sync_chats, el / 60, el % 60);
         text(16, sy0 + 9, C_TEXT, 15, sl);
       }

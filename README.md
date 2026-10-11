@@ -59,6 +59,10 @@ cd ../../app && mkdir -p build && cd build && cmake -DWA_VERSION=v1.0.0 .. && ma
 
 Tocco per quasi tutto; tenere premuto su un messaggio = menu (rispondi, reazioni, copia, modifica, elimina). Cerchio = indietro, X = scrivi/scatta, Triangolo = emoji/cambia fotocamera, L1/R1 = cambia scheda, stick/croce = scorri. Nel visualizzatore foto: pizzico con due dita = zoom.
 
+## Autore
+
+**Stefano Basile**, sviluppatore e appassionato di cybercultura, fondatore di [8byte](https://8byte.it). Sito web: <https://stefanobasile.com/> - GitHub: <https://github.com/figarocool>.
+
 ## Crediti e licenza
 
 Il progetto include parti derivate da software GPL-3.0, quindi è distribuito con licenza **GPL-3.0** (vedi `LICENSE`):

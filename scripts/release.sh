@@ -8,6 +8,8 @@ NOTES=${2:-}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=$ROOT/release-out/$TAG
 rm -rf "$OUT" && mkdir -p "$OUT"
+# 0) motore WhatsApp interno (bundle + bytecode)
+"$ROOT/engine/build_engine.sh"
 # 1) plugin
 cmake -S "$ROOT/plugin" -B "$ROOT/plugin/build" >/dev/null && cmake --build "$ROOT/plugin/build" --target wa_notify.suprx-self
 # 2) app, con la versione scritta dentro il pacchetto (assets/version.txt)

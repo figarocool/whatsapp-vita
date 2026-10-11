@@ -2,13 +2,14 @@
 import esbuild from 'esbuild';
 import { createRequire } from 'module';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const NM = path.join(here, 'node_modules') + '/', BR = path.join(here, '../../bridge/node_modules') + '/';
 const S = (n) => path.join(here, 'shims', n);
 const real = { events: NM + 'events/events.js', util: NM + 'util/util.js', buffer: NM + 'buffer/index.js', path: NM + 'path-browserify/index.js',
-  crypto: S('crypto.js'), zlib: S('zlib.js'), fs: S('fs.js'), 'fs/promises': S('fs_promises.js'), os: S('os.js'), ws: S('ws.js'), async_hooks: S('async_hooks.js'), url: S('url.js'), assert: S('assert.js'), stream: S('stream.js'), 'stream/promises': S('stream_promises.js'), string_decoder: NM + 'string_decoder/lib/string_decoder.js', process: NM + 'process/browser.js', fetch: S('fetch.js'), http: S('http.js'), https: S('http.js'), net: S('net.js'), child_process: S('child_process.js'), sharp: S('sharp.js') };
+  crypto: S('crypto.js'), zlib: S('zlib.js'), fs: S('fs.js'), 'fs/promises': S('fs_promises.js'), os: S('os.js'), ws: S('ws.js'), async_hooks: S('async_hooks.js'), url: S('url.js'), assert: S('assert.js'), stream: S('stream.js'), 'stream/promises': S('stream_promises.js'), string_decoder: NM + 'string_decoder/lib/string_decoder.js', process: NM + 'process/browser.js', fetch: S('fetch.js'), http: S('http.js'), https: S('http.js'), net: S('net.js'), child_process: S('child_process.js'), sharp: S('sharp.js'), qrcode: S('qrcode.js') };
 const curveShim = S('curve25519.js');
 const stubbed = ['tls','dns','readline','worker_threads','perf_hooks','timers','timers/promises','constants','querystring','vm','module','tty','diagnostics_channel','inspector','v8','cluster','dgram','http2','punycode','repl','sys','trace_events','wasi'];
 const stub = (name) => {
@@ -23,6 +24,8 @@ const plugin = { name: 'vita-node', setup(b) {
   b.onResolve({ filter: /^whatsapp-rust-bridge$/ }, () => ({ path: S('wrb.js') }));
   b.onResolve({ filter: /^pino$/ }, () => ({ path: 'pino', namespace: 'pinostub' }));
   b.onLoad({ filter: /.*/, namespace: 'pinostub' }, () => ({ contents: 'const mk = () => { const l = { level: "silent", child: () => mk(), trace(){}, debug(){}, info(){}, warn(){}, error(){}, fatal(){} }; return l; }; function pino() { return mk(); } pino.levels = {}; pino.default = pino; module.exports = pino;', loader: 'js' }));
+  b.onLoad({ filter: /use-multi-file-auth-state\.js$/ }, (a) => ({ contents: fs.readFileSync(S('auth-state.js'), 'utf8'), loader: 'js', resolveDir: path.dirname(a.path) }));
+  b.onResolve({ filter: /^qrcode$/ }, () => ({ path: S('qrcode.js') }));
   b.onResolve({ filter: /^curve25519-js$/ }, () => ({ path: curveShim }));
   b.onResolve({ filter: /^sharp$/ }, () => ({ path: S('sharp.js') }));
   b.onResolve({ filter: /^@whiskeysockets\/baileys$/ }, () => ({ path: BR + '@whiskeysockets/baileys/lib/index.js' }));

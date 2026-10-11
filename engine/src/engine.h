@@ -17,3 +17,7 @@ typedef struct { int status; char *headers_json; unsigned char *body; size_t len
 int eng_request(Engine *e, const char *method, const char *url, const char *headers_json, const void *body, size_t blen, int timeout_ms, EngResponse *out);
 void eng_response_free(EngResponse *r);
 int eng_listen_tcp(Engine *e, int port);   // solo per prove: espone lo stesso schema su un socket TCP locale
+
+// diagnostica: il thread dell'app puo' controllare se il motore e' fermo e in quale fase
+const char *eng_stage(void); unsigned eng_beat(void);
+void eng_shutdown(Engine *e);   // salva le chiavi di accesso ancora in memoria

@@ -58,6 +58,9 @@ struct Engine {
   HHandle hh[MAXH]; CHandle ch[MAXH]; WS ws[MAXWS];
 };
 static Engine *G;
+static volatile const char *g_stage = "avvio"; static volatile unsigned g_beat;
+const char *eng_stage(void) { return (const char *)g_stage; } unsigned eng_beat(void) { return g_beat; }
+#define STAGE(s) (g_stage = (s))
 
 static long long now_ms(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000; }
 static void elog(const char *fmt, ...) { char b[1024]; va_list ap; va_start(ap, fmt); vsnprintf(b, sizeof b, fmt, ap); va_end(ap); if (G && G->log) G->log(b); else fprintf(stderr, "%s\n", b); }
@@ -247,6 +250,7 @@ static JSValue js_fs_copy(JSContext *ctx, JSValueConst this_val, int argc, JSVal
   JS_FreeCString(ctx, a); JS_FreeCString(ctx, b); return JS_NewBool(ctx, ok);
 }
 
+static JSValue js_crc32(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) { size_t n = 0; uint8_t *p = get_bytes(ctx, argv[0], &n); if (!p && n) return JS_ThrowTypeError(ctx, "serve un buffer"); return JS_NewUint32(ctx, (uint32_t)crc32(crc32(0L, Z_NULL, 0), p ? p : (const Bytef *)"", (uInt)n)); }
 // ---------- zlib ----------
 static JSValue js_zlib(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic) {   // magic 0 = inflate, 1 = deflate
   NEED_BYTES(p, n, 0); z_stream s; memset(&s, 0, sizeof s); int rc = magic ? deflateInit(&s, 6) : inflateInit(&s); if (rc != Z_OK) return JS_ThrowInternalError(ctx, "zlib init");
@@ -285,7 +289,7 @@ static int ws_send_frame(WS *w, int op, const unsigned char *d, size_t n) {
 }
 static void ws_event(WS *w, const char *type, const void *data, size_t n, int binary) {
   JSContext *ctx = G->ctx; JSValue args[3] = { JS_NewString(ctx, type), data ? new_ab(ctx, data, n) : JS_UNDEFINED, JS_NewBool(ctx, binary) };
-  JSValue cb = JS_DupValue(ctx, w->cb);
+  JSValue cb = JS_DupValue(ctx, w->cb); STAGE("esecuzione JS (messaggio websocket)");
   JSValue r = JS_Call(ctx, cb, JS_UNDEFINED, 3, args); JS_FreeValue(ctx, cb); if (JS_IsException(r)) { JSValue ex = JS_GetException(ctx); const char *s = JS_ToCString(ctx, ex); elog("errore nel callback ws: %s", s ? s : "?"); JS_FreeCString(ctx, s); JS_FreeValue(ctx, ex); }
   JS_FreeValue(ctx, r); for (int i = 0; i < 3; i++) JS_FreeValue(ctx, args[i]);
 }
@@ -301,8 +305,9 @@ static JSValue js_ws_open(JSContext *ctx, JSValueConst this_val, int argc, JSVal
   int id = -1; for (int i = 0; i < MAXWS; i++) if (!G->ws[i].used) { id = i; break; } if (id < 0) return JS_ThrowInternalError(ctx, "troppi websocket");
   WS *w = &G->ws[id]; memset(w, 0, sizeof *w); w->used = 1; w->cb = JS_DupValue(ctx, argv[2]);
   mbedtls_ssl_init(&w->ssl); mbedtls_ssl_config_init(&w->conf); mbedtls_net_init(&w->net);
-  int rc; char eb[160];
-  if ((rc = mbedtls_net_connect(&w->net, host, port, MBEDTLS_NET_PROTO_TCP)) != 0) { ws_free(w); return JS_ThrowInternalError(ctx, "connessione a %s fallita (%d)", host, rc); }
+  int rc; char eb[160]; STAGE("websocket: DNS e connessione TCP"); long long tws = now_ms();
+  if ((rc = mbedtls_net_connect(&w->net, host, port, MBEDTLS_NET_PROTO_TCP)) != 0) { ws_free(w); elog("websocket: connessione a %s fallita (%d) dopo %lld ms", host, rc, now_ms() - tws); return JS_ThrowInternalError(ctx, "connessione a %s fallita (%d)", host, rc); }
+  elog("websocket: TCP connesso in %lld ms", now_ms() - tws); STAGE("websocket: handshake TLS");
   mbedtls_ssl_config_defaults(&w->conf, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
   mbedtls_ssl_conf_rng(&w->conf, mbedtls_ctr_drbg_random, &G->drbg);
   mbedtls_ssl_conf_max_tls_version(&w->conf, MBEDTLS_SSL_VERSION_TLS1_2);   // WhatsApp supporta TLS 1.2: piu' leggero e uguale su PC e Vita
@@ -311,6 +316,7 @@ static JSValue js_ws_open(JSContext *ctx, JSValueConst this_val, int argc, JSVal
   if ((rc = mbedtls_ssl_setup(&w->ssl, &w->conf)) != 0 || (rc = mbedtls_ssl_set_hostname(&w->ssl, host)) != 0) { ws_free(w); return JS_ThrowInternalError(ctx, "ssl_setup"); }
   mbedtls_ssl_set_bio(&w->ssl, &w->net, mbedtls_net_send, mbedtls_net_recv, mbedtls_net_recv_timeout);
   while ((rc = mbedtls_ssl_handshake(&w->ssl)) != 0) { if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE) { mbedtls_strerror(rc, eb, sizeof eb); uint32_t fl = mbedtls_ssl_get_verify_result(&w->ssl); ws_free(w); return JS_ThrowInternalError(ctx, "TLS: %s (verifica 0x%x)", eb, (unsigned)fl); } }
+  elog("websocket: TLS pronto dopo %lld ms", now_ms() - tws); STAGE("websocket: upgrade HTTP");
   // richiesta di upgrade
   unsigned char kraw[16]; char key[32]; size_t kl; mbedtls_ctr_drbg_random(&G->drbg, kraw, 16); mbedtls_base64_encode((unsigned char *)key, sizeof key, &kl, kraw, 16); key[kl] = 0;
   char req[4096]; int n = snprintf(req, sizeof req, "GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n", path, host, key);
@@ -325,7 +331,7 @@ static JSValue js_ws_open(JSContext *ctx, JSValueConst this_val, int argc, JSVal
   char resp[4096]; size_t rl = 0; long long t0 = now_ms();
   while (rl < sizeof resp - 1 && now_ms() - t0 < 20000) { int r = mbedtls_ssl_read(&w->ssl, (unsigned char *)resp + rl, 1); if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) continue; if (r <= 0) break; rl++; if (rl >= 4 && !memcmp(resp + rl - 4, "\r\n\r\n", 4)) break; }
   resp[rl] = 0; if (strncmp(resp, "HTTP/1.1 101", 12) != 0) { char first[120]; snprintf(first, sizeof first, "%.100s", resp); char *nl = strchr(first, '\r'); if (nl) *nl = 0; ws_free(w); return JS_ThrowInternalError(ctx, "upgrade WebSocket rifiutato: %s", first); }
-  mbedtls_net_set_nonblock(&w->net); mbedtls_ssl_set_bio(&w->ssl, &w->net, mbedtls_net_send, mbedtls_net_recv, NULL); w->state = 1; w->fd = w->net.fd;   // da qui letture non bloccanti
+  elog("websocket: aperto dopo %lld ms", now_ms() - tws); mbedtls_net_set_nonblock(&w->net); mbedtls_ssl_set_bio(&w->ssl, &w->net, mbedtls_net_send, mbedtls_net_recv, NULL); w->state = 1; w->fd = w->net.fd;   // da qui letture non bloccanti
   return JS_NewInt32(ctx, id);
 }
 static JSValue js_ws_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -492,7 +498,7 @@ static void http_service(Http *h) {
 // ---------- richieste verso il bridge JS (dalla app o da un socket di prova) ----------
 static void report_exception(JSContext *ctx, const char *where); static void drain_jobs(Engine *e); static void flush_rejections(JSContext *ctx);
 typedef struct Req {
-  struct Req *next; int id, done, status, from_tcp, tcp_slot;
+  struct Req *next; int id, done, status, from_tcp, tcp_slot; long long t0;
   char *method, *url, *headers; unsigned char *body; size_t blen;
   unsigned char *resp; size_t rlen, rcap; char *rheaders;
   pthread_cond_t cv;
@@ -508,14 +514,14 @@ static JSValue js_respond(JSContext *ctx, JSValueConst this_val, int argc, JSVal
   if (!r) return JS_FALSE;
   if (!JS_IsNull(argv[2]) && !JS_IsUndefined(argv[2])) { const char *hj = JS_ToCString(ctx, argv[2]); if (hj) { free(r->rheaders); r->rheaders = strdup(hj); r->status = status; JS_FreeCString(ctx, hj); } }
   if (!JS_IsNull(argv[3]) && !JS_IsUndefined(argv[3])) { size_t n = 0; uint8_t *p = get_bytes(ctx, argv[3], &n); if (p && n) { if (r->rlen + n > r->rcap) { r->rcap = (r->rlen + n) * 2 + 4096; r->resp = realloc(r->resp, r->rcap); } memcpy(r->resp + r->rlen, p, n); r->rlen += n; } }
-  if (last) { pthread_mutex_lock(&rq_mu); r->done = 1; for (int i = 0; i < 64; i++) if (rq_active[i] == r) rq_active[i] = NULL; if (!r->from_tcp) pthread_cond_signal(&r->cv); pthread_mutex_unlock(&rq_mu); }
+  if (last) { long long dt = now_ms() - r->t0; if (dt > 700) elog("richiesta lenta: %s %s -> %d in %lld ms", r->method, r->url, status, dt); pthread_mutex_lock(&rq_mu); r->done = 1; for (int i = 0; i < 64; i++) if (rq_active[i] == r) rq_active[i] = NULL; if (!r->from_tcp) pthread_cond_signal(&r->cv); pthread_mutex_unlock(&rq_mu); }
   return JS_TRUE;
 }
 int eng_request(Engine *e, const char *method, const char *url, const char *headers_json, const void *body, size_t blen, int timeout_ms, EngResponse *out) {
   Req *r = calloc(1, sizeof *r); pthread_cond_init(&r->cv, NULL); r->method = strdup(method); r->url = strdup(url); r->headers = strdup(headers_json ? headers_json : "{}");
   if (blen) { r->body = malloc(blen); memcpy(r->body, body, blen); r->blen = blen; }
   memset(out, 0, sizeof *out);
-  pthread_mutex_lock(&rq_mu); r->id = ++rq_next_id; r->next = NULL; if (rq_tail) rq_tail->next = r; else rq_head = r; rq_tail = r;
+  pthread_mutex_lock(&rq_mu); r->t0 = now_ms(); r->id = ++rq_next_id; r->next = NULL; if (rq_tail) rq_tail->next = r; else rq_head = r; rq_tail = r;
   struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); ts.tv_sec += timeout_ms / 1000; ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L; if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
   int rc = 0; while (!r->done && rc == 0) rc = pthread_cond_timedwait(&r->cv, &rq_mu, &ts);
   int ok = r->done;
@@ -533,7 +539,7 @@ static void rq_pump(Engine *e) {
     if (!r) return;
     JSContext *ctx = e->ctx; JSValue hv = JS_ParseJSON(ctx, r->headers, strlen(r->headers), "<headers>"); if (JS_IsException(hv)) { JS_FreeValue(ctx, JS_GetException(ctx)); hv = JS_NewObject(ctx); }
     JSValue args[5] = { JS_NewInt32(ctx, r->id), JS_NewString(ctx, r->method), JS_NewString(ctx, r->url), hv, r->blen ? new_ab(ctx, r->body, r->blen) : JS_NULL };
-    JSValue res = JS_Call(ctx, rq_handler, JS_UNDEFINED, 5, args); if (JS_IsException(res)) report_exception(ctx, "gestore richieste"); JS_FreeValue(ctx, res); for (int i = 0; i < 5; i++) JS_FreeValue(ctx, args[i]);
+    STAGE("esecuzione JS (richiesta dell'app)"); JSValue res = JS_Call(ctx, rq_handler, JS_UNDEFINED, 5, args); if (JS_IsException(res)) report_exception(ctx, "gestore richieste"); JS_FreeValue(ctx, res); for (int i = 0; i < 5; i++) JS_FreeValue(ctx, args[i]);
     drain_jobs(e);
   }
 }
@@ -579,7 +585,7 @@ static void tcp_service(Engine *e) {
     while (*line && !(line[0] == '\r')) { char *eol = strstr(line, "\r\n"); if (!eol) break; *eol = 0; char *cl = strchr(line, ':'); if (cl) { *cl = 0; char *v = cl + 1; while (*v == ' ') v++; for (char *k = line; *k; k++) if (*k >= 'A' && *k <= 'Z') *k += 32; if (!first) js[jl++] = ','; first = 0; jl += snprintf(js + jl, jcap - jl, "\"%s\":\"", line); for (char *k = v; *k && jl + 8 < jcap; k++) { if (*k == '"' || *k == '\\') js[jl++] = '\\'; js[jl++] = *k; } js[jl++] = '"'; } line = eol + 2; }
     js[jl++] = '}'; js[jl] = 0;
     Req *rq = calloc(1, sizeof *rq); pthread_cond_init(&rq->cv, NULL); rq->method = strdup(method); rq->url = strdup(path); rq->headers = js; rq->from_tcp = 1; if (clen) { rq->body = malloc(clen); memcpy(rq->body, c->buf + hl, clen); rq->blen = clen; }
-    pthread_mutex_lock(&rq_mu); rq->id = ++rq_next_id; if (rq_tail) rq_tail->next = rq; else rq_head = rq; rq_tail = rq; pthread_mutex_unlock(&rq_mu);
+    pthread_mutex_lock(&rq_mu); rq->t0 = now_ms(); rq->id = ++rq_next_id; if (rq_tail) rq_tail->next = rq; else rq_head = rq; rq_tail = rq; pthread_mutex_unlock(&rq_mu);
     c->req = rq; free(hdr);
   }
 }
@@ -589,8 +595,9 @@ static void report_exception(JSContext *ctx, const char *where) {
   JSValue ex = JS_GetException(ctx); const char *s = JS_ToCString(ctx, ex); JSValue st = JS_GetPropertyStr(ctx, ex, "stack"); const char *ss = JS_IsUndefined(st) ? NULL : JS_ToCString(ctx, st);
   elog("ERRORE JS (%s): %s%s%s", where, s ? s : "?", ss ? "\n" : "", ss ? ss : ""); JS_FreeCString(ctx, s); JS_FreeCString(ctx, ss); JS_FreeValue(ctx, st); JS_FreeValue(ctx, ex);
 }
-static void drain_jobs(Engine *e) { JSContext *c1; int r; while ((r = JS_ExecutePendingJob(e->rt, &c1)) != 0) { if (r < 0) report_exception(c1, "job"); } }
+static void drain_jobs(Engine *e) { STAGE("esecuzione JS (promesse)"); JSContext *c1; int r; while ((r = JS_ExecutePendingJob(e->rt, &c1)) != 0) { if (r < 0) report_exception(c1, "job"); } }
 int eng_loop_step(Engine *e, int max_wait_ms) {
+  g_beat++; STAGE("ciclo eventi");
   { static long long last_mem; long long t = now_ms(); if (t - last_mem > 30000) { last_mem = t; JSMemoryUsage mu; JS_ComputeMemoryUsage(e->rt, &mu); struct mallinfo mi = mallinfo(); elog("memoria motore: JS %.1f MB (%lld oggetti, %lld stringhe); heap totale in uso %.1f MB", mu.malloc_size / 1048576.0, (long long)mu.obj_count, (long long)mu.str_count, mi.uordblks / 1048576.0); } }
   drain_jobs(e); tcp_service(e); rq_pump(e); if (!JS_IsUndefined(rq_handler) && max_wait_ms > 10) max_wait_ms = 10;   // con il gestore attivo si controlla la coda spesso
   long long now = now_ms(); Timer *best = NULL; for (Timer *t = e->timers; t; t = t->next) if (!best || t->due < best->due) best = t;
@@ -608,7 +615,7 @@ int eng_loop_step(Engine *e, int max_wait_ms) {
     Timer *due = NULL; for (Timer *t = e->timers; t; t = t->next) if (t->due <= now && (!due || t->due < due->due)) due = t; if (!due) break;
     JSValue fn = JS_DupValue(e->ctx, due->fn);
     if (due->every) due->due = now + due->every; else { for (Timer **pp = &e->timers; *pp; pp = &(*pp)->next) if (*pp == due) { *pp = due->next; break; } JS_FreeValue(e->ctx, due->fn); free(due); }
-    JSValue r = JS_Call(e->ctx, fn, JS_UNDEFINED, 0, NULL); if (JS_IsException(r)) report_exception(e->ctx, "timer"); JS_FreeValue(e->ctx, r); JS_FreeValue(e->ctx, fn); drain_jobs(e);
+    STAGE("esecuzione JS (timer)"); JSValue r = JS_Call(e->ctx, fn, JS_UNDEFINED, 0, NULL); if (JS_IsException(r)) report_exception(e->ctx, "timer"); JS_FreeValue(e->ctx, r); JS_FreeValue(e->ctx, fn); drain_jobs(e);
     now = now_ms();
   }
   drain_jobs(e); flush_rejections(e->ctx); tcp_service(e); rq_pump(e); int work = e->timers != NULL || !JS_IsUndefined(rq_handler); for (int i = 0; i < MAXWS; i++) if (e->ws[i].used) work = 1; for (int i = 0; i < MAXHTTP; i++) if (G_http[i].used) work = 1;
@@ -640,7 +647,13 @@ static void rejection_tracker(JSContext *ctx, JSValueConst promise, JSValueConst
 static void flush_rejections(JSContext *ctx) { for (int i = 0; i < 32; i++) if (pend_rej[i].used) { elog("%s", pend_rej[i].msg); JS_FreeValue(ctx, pend_rej[i].promise); free(pend_rej[i].msg); pend_rej[i].used = 0; } }
 int eng_run_module(Engine *e, const char *path) {
   size_t n; char *src = read_file(path, &n); if (!src) { elog("impossibile leggere %s", path); return -1; }
-  JSValue v = JS_Eval(e->ctx, src, n, path, JS_EVAL_TYPE_MODULE); free(src);
+  size_t pl = strlen(path); JSValue v;
+  if (pl > 4 && !strcmp(path + pl - 4, ".qbc")) {   // bytecode precompilato: niente analisi del testo all'avvio (molto piu' veloce sulla Vita)
+    JSValue obj = JS_ReadObject(e->ctx, (const uint8_t *)src, n, JS_READ_OBJ_BYTECODE); free(src);
+    if (JS_IsException(obj)) { report_exception(e->ctx, path); return -1; }
+    if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE && JS_ResolveModule(e->ctx, obj) < 0) { JS_FreeValue(e->ctx, obj); report_exception(e->ctx, path); return -1; }
+    v = JS_EvalFunction(e->ctx, obj);
+  } else { v = JS_Eval(e->ctx, src, n, path, JS_EVAL_TYPE_MODULE); free(src); }
   if (JS_IsException(v)) { report_exception(e->ctx, path); return -1; }
   drain_jobs(e); JS_FreeValue(e->ctx, v); return 0;
 }
@@ -668,6 +681,7 @@ Engine *eng_new(const char *cacert_path, const char *data_dir, EngineLog log) {
   FN("curveKeypair", js_curve_keypair, 1); FN("curveShared", js_curve_shared, 2); FN("curveSign", js_curve_sign, 3); FN("curveVerify", js_curve_verify, 3);
   FN("audioToWav", js_audio_to_wav, 1); FN("videoPlayable", js_video_playable, 1); FN("fsCopy", js_fs_copy, 2);
   FN("imgConvert", js_img_convert, 7); FN("imgInfo", js_img_info, 1);
+  FN("crc32", js_crc32, 1);
   FN("setHandler", js_set_handler, 1); FN("respond", js_respond, 5);
   FN("httpRequest", js_http_request, 5); FN("httpAbort", js_http_abort, 1);
   FN("wsOpen", js_ws_open, 3); FN("wsSend", js_ws_send, 3); FN("wsClose", js_ws_close, 1);
@@ -675,4 +689,5 @@ Engine *eng_new(const char *cacert_path, const char *data_dir, EngineLog log) {
   JS_SetPropertyStr(ctx, g, "__nat", nat); JS_FreeValue(ctx, g);
   return e;
 }
+void eng_shutdown(Engine *e) { JSContext *ctx = e->ctx; JSValue g = JS_GetGlobalObject(ctx); JSValue f = JS_GetPropertyStr(ctx, g, "__flushAuth"); if (JS_IsFunction(ctx, f)) { JSValue r = JS_Call(ctx, f, JS_UNDEFINED, 0, NULL); if (JS_IsException(r)) report_exception(ctx, "__flushAuth"); JS_FreeValue(ctx, r); } JS_FreeValue(ctx, f); JS_FreeValue(ctx, g); }
 void eng_free(Engine *e) { if (!e) return; for (int i = 0; i < MAXWS; i++) ws_free(&e->ws[i]); for (int i = 0; i < MAXHTTP; i++) http_free(&G_http[i]); JS_FreeContext(e->ctx); JS_FreeRuntime(e->rt); free(e); }

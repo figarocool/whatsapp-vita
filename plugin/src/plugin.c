@@ -190,6 +190,26 @@ static int notice_send(const char *text) {
   int r = p_lsdb(data, 1); sh_clean(data); plog("notifica con tocco inviata, esito 0x%x", r, 0); return r;
 }
 
+
+// ---- prova della rete nella shell: letture grandi (come farebbe TLS) e poi una notifica ----
+// Si attiva creando ur0:tai/wa_probe_net.txt con dentro "ip:porta:dimensione-lettura" (es. 192.168.1.59:8999:4096). Il file viene cancellato subito.
+static void probe_net(void) {
+  char b[80] = ""; SceUID f = sceIoOpen("ur0:tai/wa_probe_net.txt", SCE_O_RDONLY, 0); if (f < 0) return; int n = sceIoRead(f, b, sizeof b - 1); sceIoClose(f); sceIoRemove("ur0:tai/wa_probe_net.txt"); if (n <= 0) return; b[n] = 0;
+  char ip[24]; int port = 8999, chunk = 4096, k = 0; char *p = b; while (*p && *p != ':' && *p != '\n' && k < 23) ip[k++] = *p++; ip[k] = 0; if (*p == ':') { port = atoi(p + 1); p = strchr(p + 1, ':'); if (p) chunk = atoi(p + 1); } if (chunk < 16) chunk = 16; if (chunk > 8192) chunk = 8192;
+  plog("PROVA RETE: inizio (porta %d, letture da %d byte)", port, chunk); int r1 = notice_send("PROVA RETE 1/2: prima della lettura"); plog("PROVA RETE: notifica 1 esito 0x%x", r1, 0);
+  sceKernelDelayThread(4 * 1000 * 1000);
+  if (!net_resolve()) { plog("PROVA RETE: rete non disponibile", 0, 0); return; }
+  int s = n_socket("waprobe", SCE_NET_AF_INET, SCE_NET_SOCK_STREAM, 0); if (s < 0) { plog("PROVA RETE: socket errore 0x%x", s, 0); return; }
+  int to = 8 * 1000 * 1000; n_setopt(s, SCE_NET_SOL_SOCKET, SCE_NET_SO_RCVTIMEO, &to, sizeof to);
+  SceNetSockaddrIn a; memset(&a, 0, sizeof a); a.sin_len = sizeof a; a.sin_family = SCE_NET_AF_INET; a.sin_port = (unsigned short)(((port & 0xFF) << 8) | ((port >> 8) & 0xFF)); unsigned ipn; if (!parse_ip(ip, &ipn)) { n_close(s); plog("PROVA RETE: indirizzo non valido", 0, 0); return; } a.sin_addr.s_addr = ipn;
+  int cr = n_connect(s, (SceNetSockaddr *)&a, sizeof a); if (cr < 0) { plog("PROVA RETE: connessione fallita 0x%x", cr, 0); n_close(s); return; }
+  static char buf[8192]; int total = 0, r, calls = 0; while (total < 20000 && (r = n_recv(s, buf, chunk, 0)) > 0) { total += r; calls++; }
+  n_close(s); plog("PROVA RETE: letti %d byte in %d letture", total, calls);
+  sceKernelDelayThread(3 * 1000 * 1000);
+  int r2 = notice_send("PROVA RETE 2/2: dopo la lettura grande"); plog("PROVA RETE: notifica 2 (dopo la lettura) esito 0x%x", r2, 0);
+  plog(r2 == 0 ? "PROVA RETE: RIUSCITA, le letture grandi non rompono le notifiche" : "PROVA RETE: FALLITA, la notifica dopo la lettura non parte", 0, 0);
+}
+
 static void touch_alive(void) { SceUID f = sceIoOpen(ALIVE, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (f >= 0) { sceIoWrite(f, "1", 1); sceIoClose(f); } }
 static int worker(SceSize args, void *argp) {
   (void)args; (void)argp;
@@ -202,6 +222,7 @@ static int worker(SceSize args, void *argp) {
     if (loops++ % 4 == 0) touch_alive();
     { SceIoStat ts; if (sceIoGetstat(NOTIF_TEST, &ts) >= 0) { sceIoRemove(NOTIF_TEST); plog("richiesta di notifica di prova", 0, 0); if (notice_send("WhatsApp: prova di notifica riuscita") != 0) send_notif("WhatsApp: prova di notifica riuscita"); } }
     { SceIoStat ts2; if (sceIoGetstat("ur0:tai/wa_notif_test3.txt", &ts2) >= 0) { sceIoRemove("ur0:tai/wa_notif_test3.txt"); plog("prova notifica con tocco (shell)", 0, 0); notice_send("WhatsApp: tocca per aprire"); } }
+    probe_net();
     load_cfg();
     int active_now = app_active();   // va chiamata a ogni giro: serve a vedere il file cambiare
     char req[48], rx[RX_MAX + 1];

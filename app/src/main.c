@@ -435,8 +435,8 @@ static void engine_log(const char *l) { crumb("motore: %s", l); }
 static void *engine_main(void *arg) {
   (void)arg; sceIoMkdir("ux0:data/whatsapp/engine", 0777);
   g_engine = eng_new("app0:assets/cacert.pem", "ux0:data/whatsapp/engine", engine_log); net_set_engine(g_engine);
-  if (eng_run_module(g_engine, "app0:assets/engine.js") == 0) while (!quit_flag && eng_loop_step(g_engine, 20) > 0) {}
-  crumb("motore fermo"); return NULL;
+  if (eng_run_module(g_engine, "app0:assets/engine.qbc") == 0) while (!quit_flag && eng_loop_step(g_engine, 20) > 0) {}
+  eng_shutdown(g_engine); crumb("motore fermo (chiavi salvate)"); return NULL;
 }
 static void engine_start(void) {
   if (engine_started || strncmp(base_url, "engine:", 7)) return; engine_started = 1;
@@ -1317,6 +1317,10 @@ int main(void) {
       if (stick != 0) { if (screen == S_LIST) list_scroll += stick; else if (screen == S_CHAT) { if (emoji_open) emo_scroll += stick; else { chat_scroll += stick; chat_stick = 0; } } else if (screen == S_PICKER) pick_scroll += stick; else if (screen > S_PREVIEW) misc_scroll += stick; }
     }
 
+    {   // controllo esterno: il motore e' fermo? in quale fase? (si scrive nel registro ogni 10 s)
+      static unsigned lastb; static unsigned long long tb, tl; unsigned long long nw = sceKernelGetProcessTimeWide();
+      if (g_engine) { unsigned b = eng_beat(); if (b != lastb || !tb) { lastb = b; tb = nw; } else if (nw - tb > 10000000ULL && nw - tl > 10000000ULL) { tl = nw; crumb("MOTORE FERMO da %llu s nella fase: %s", (nw - tb) / 1000000ULL, eng_stage()); } }
+    }
     // ---- disegno ----
     list_scroll = roundf(list_scroll); chat_scroll = roundf(chat_scroll); emo_scroll = roundf(emo_scroll); pick_scroll = roundf(pick_scroll); misc_scroll = roundf(misc_scroll);
     FC("input ok");
@@ -1760,7 +1764,7 @@ int main(void) {
       }
     }
   }
-  cam_stop(); crumb("uscita normale"); quit_flag = 1; pthread_join(th, NULL); sceIoRemove("ur0:tai/wa_active.txt"); sceIoRemove(LOCKFILE);
+  cam_stop(); crumb("uscita normale"); quit_flag = 1; pthread_join(th, NULL); if (engine_started) pthread_join(engine_th, NULL); sceIoRemove("ur0:tai/wa_active.txt"); sceIoRemove(LOCKFILE);
   upd_cleanup_helper();   // se resta l'app installatrice dell'ultimo aggiornamento, la si toglie ora (a grafica chiusa), non all'avvio
   sceKernelExitProcess(0);
   return 0;

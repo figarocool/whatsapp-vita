@@ -11,3 +11,6 @@ target_include_directories(qjs PUBLIC quickjs)
 add_executable(engine_pc src/engine.c src/curve25519.c src/image.c src/audio.c src/main_pc.c)
 target_include_directories(engine_pc PRIVATE src quickjs ${MBED_SRC}/include)
 target_link_libraries(engine_pc qjs ${MBED_DIR}/library/libmbedtls.a ${MBED_DIR}/library/libmbedx509.a ${MBED_DIR}/library/libmbedcrypto.a opus ogg jpeg png webpdemux webp sharpyuv z m pthread)
+
+add_executable(qjsbc tools/qjsbc.c)
+target_link_libraries(qjsbc qjs m pthread)

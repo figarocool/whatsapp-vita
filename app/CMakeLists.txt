@@ -43,7 +43,7 @@ set(COMMON_FILES
   FILE assets/author.png assets/author.png
   FILE assets/emoji.bin assets/emoji.bin
   FILE assets/cacert.pem assets/cacert.pem
-  FILE ${ENGINE_DIR}/js/bridge.min.js assets/engine.js
+  FILE ${ENGINE_DIR}/js/bridge.min.qbc assets/engine.qbc
   FILE assets/font-ja.ttf assets/font-ja.ttf
   FILE assets/font-ko.ttf assets/font-ko.ttf
   FILE assets/font-zhs.ttf assets/font-zhs.ttf

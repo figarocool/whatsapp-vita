@@ -9,3 +9,5 @@ int player_active(void);
 // da chiamare a ogni frame: aggiorna l'immagine; ritorna la texture corrente (o NULL se non c'e' ancora un fotogramma)
 vita2d_texture *player_frame(void);
 unsigned player_frames(void);   // fotogrammi ricevuti finora (diagnostica)
+void player_size(unsigned *w, unsigned *h);   // dimensioni dell'ultimo fotogramma
+void player_audio_diag(char *out, int n);   // stato dell'audio (diagnostica)

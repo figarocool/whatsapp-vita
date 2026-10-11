@@ -188,7 +188,7 @@ static void draw_statusview(void) {
     Media *md = media_get("status@broadcast", id);
     if (md && md->tex) { float w0 = vita2d_texture_get_width(md->tex), h0 = vita2d_texture_get_height(md->tex); float s = fminf((SW - 40) / w0, (SH - 170) / h0); vita2d_draw_texture_scale(md->tex, (SW - w0 * s) / 2, 80 + (SH - 170 - h0 * s) / 2, s, s); }
     else text(SW / 2 - 40, SH / 2 - 10, C_SUB, 20, md && md->state == 2 ? T("Errore") : "...");
-    if (!strcmp(kind, "video")) { vp_want("status@broadcast", id); vp_draw(20, 80, SW - 40, SH - 170); }
+    if (!strcmp(kind, "video")) { vp_want("status@broadcast", id); vp_draw(0, 0, SW, SH); }
     if (txt[0]) { vita2d_draw_rectangle(0, SH - 90, SW, 90, RGBA8(0, 0, 0, 150)); wrap_text(txt, 40, SH - 78, SW - 80, 20, C_WHITE, 26, 1); }
   } else wrap_text(txt, 80, 150, SW - 160, 32, C_WHITE, 42, 1);
   int n = its->count, seg = (SW - 40 - (n - 1) * 4) / n;
@@ -369,7 +369,7 @@ static void draw_viewer(void) {
     vita2d_draw_texture_scale(vt, ccx + vpx - w / 2, ccy + vpy - h / 2, s / 1.0f, s / 1.0f);
     if (md && !md->big && (md->bstate == 4 || md->bstate == 3)) text(SW / 2 - 70, 36 + (SH - 140) / 2.0f - 10, RGBA8(210, 210, 210, 255), 16, T("Carico la foto..."));
   }
-  if (view_is_video) { vp_want(view_jid, view_key_id); vp_draw(0, 36, SW, SH - 140); }
+  if (view_is_video) { vp_want(view_jid, view_key_id); vp_draw(0, 0, SW, SH - 70); }
   btn(0, 0, SW, SH, B_VIEW_CLOSE, 0);
   { const char *lab[3] = { view_is_video ? T("Salva video") : T("Salva foto"), T("Rispondi"), T("Reagisci") }; int ids[3] = { B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT }; int gap = 10, bw = (SW - 4 * gap) / 3; if (bw > 210) bw = 210; int x0 = (SW - 3 * bw - 2 * gap) / 2;
     for (int i = 0; i < 3; i++) { int bx = x0 + i * (bw + gap); rrect(bx, SH - 60, bw, 44, 22, RGBA8(40, 40, 40, 255)); text(bx + (bw - tw(18, lab[i])) / 2, SH - 49, C_WHITE, 18, lab[i]); btn(bx, SH - 60, bw, 44, ids[i], 0); } }
@@ -738,6 +738,9 @@ static void start_prep(const char *jid, const char *id, const char *kind, const 
 static int vp_touched;
 static void vp_stop(void);
 static void vp_stop(void) { if (vp.key[0]) { vp.gen++; vp.key[0] = 0; vp.state = 0; } vp.audio = 0; player_close(); }
+static void vp_open_ready(void) {
+  if (vp.key[0] && vp.state == 2 && !vp.opened) { vp.opened = 1; int pr = player_open(vp.path, !vp.audio); crumb("lettore: apertura %s -> 0x%x", vp.path, (unsigned)pr); if (pr != 0) vp.state = 3; }
+}
 static void vp_want(const char *jid, const char *id) {
   vp_touched = 1; if (vp.audio && vp.key[0]) vp_stop();  /* un video prende il posto di un audio in corso */ char k[260]; snprintf(k, sizeof k, "%s|%s", jid, id);
   if (strcmp(k, vp.key)) {
@@ -746,7 +749,7 @@ static void vp_want(const char *jid, const char *id) {
     if (sceIoGetstat(cf, &st) >= 0 && st.st_size > 0) { snprintf(vp.path, sizeof vp.path, "%s", cf); vp.state = 2; }
     else { Job *j = job_new(J_VPREP, jid); if (j) { snprintf(j->id, sizeof j->id, "%s", id); snprintf(j->kind, sizeof j->kind, "%s", vp.audio ? "audio" : "video"); snprintf(j->extra, sizeof j->extra, "%d", vp.gen); job_commit(); } else vp.state = 3; }
   }
-  if (vp.state == 2 && !vp.opened) { vp.opened = 1; int pr = player_open(vp.path, !vp.audio); crumb("lettore: apertura %s -> 0x%x", vp.path, (unsigned)pr); if (pr != 0) vp.state = 3; }
+  vp_open_ready();
 }
 // audio in chat: un tocco avvia (dopo la conversione in MP3 sul bridge), un altro tocco ferma
 static void aud_toggle(const char *jid, const char *id) {
@@ -762,8 +765,8 @@ static int aud_state(const char *jid, const char *id, int *pct, int *secs) {
 // disegna il video (o lo stato della preparazione) nel riquadro; 1 se si vede il filmato
 static int vp_draw(float x, float y, float w, float h) {
   vita2d_texture *t = vp.state == 2 ? player_frame() : NULL;
-  { static unsigned long long t0; static char lk[260]; if (strcmp(lk, vp.key)) { snprintf(lk, sizeof lk, "%s", vp.key); t0 = 0; } if (vp.state == 2 && !t0) t0 = sceKernelGetProcessTimeWide(); if (vp.state == 2 && t0) { if (t && player_frames() == 1) { crumb("lettore: primo fotogramma %dx%d", (int)vita2d_texture_get_width(t), (int)vita2d_texture_get_height(t)); t0 = 1; } else if (t0 > 1000 && !t && sceKernelGetProcessTimeWide() - t0 > 5000000ULL) { crumb("lettore: nessun fotogramma dopo 5 s"); t0 = 1; } } }
-  if (t) { float tw0 = vita2d_texture_get_width(t), th0 = vita2d_texture_get_height(t), s = fminf(w / tw0, h / th0); vita2d_draw_texture_scale(t, x + (w - tw0 * s) / 2, y + (h - th0 * s) / 2, s, s); return 1; }
+  { static unsigned long long t0; static char lk[260]; if (strcmp(lk, vp.key)) { snprintf(lk, sizeof lk, "%s", vp.key); t0 = 0; } if (vp.state == 2 && !t0) t0 = sceKernelGetProcessTimeWide(); if (vp.state == 2 && t0) { if (t && player_frames() == 1) { { unsigned a_ = 0, b_ = 0; player_size(&a_, &b_); crumb("lettore: primo fotogramma %ux%u", a_, b_); } t0 = 1; } else if (t0 > 1000 && !t && sceKernelGetProcessTimeWide() - t0 > 5000000ULL) { crumb("lettore: nessun fotogramma dopo 5 s"); t0 = 1; } } }
+  if (t) { unsigned pw_ = 0, ph_ = 0; player_size(&pw_, &ph_); float tw0 = pw_ ? (float)pw_ : vita2d_texture_get_width(t), th0 = ph_ ? (float)ph_ : vita2d_texture_get_height(t), s = fminf(w / tw0, h / th0); vita2d_draw_texture_scale(t, x + (w - tw0 * s) / 2, y + (h - th0 * s) / 2, s, s); return 1; }
   char b[96]; if (vp.state == 3) snprintf(b, sizeof b, "%s", T("Video non disponibile")); else if (vp.phase == 1) snprintf(b, sizeof b, "%s %d%%", T("Converto per la Vita"), vp.pct); else if (vp.phase == 2) snprintf(b, sizeof b, "%s %d%%", T("Scarico sulla Vita"), vp.pct); else snprintf(b, sizeof b, "%s", T("Scarico da WhatsApp"));
   float bw = 360, bx = x + (w - bw) / 2, by = y + h / 2 + 30;
   vita2d_draw_rectangle(bx - 30, by - 50, bw + 60, 96, RGBA8(0, 0, 0, 170)); text((int)(x + (w - tw(18, b)) / 2), (int)by - 38, C_WHITE, 18, b);
@@ -771,6 +774,8 @@ static int vp_draw(float x, float y, float w, float h) {
   return 0;
 }
 static void draw_xfer_overlay(void) {
+  if (vp.audio) vp_open_ready();
+  { static unsigned long long ad_t; static int ad_done; if (vp.audio && vp.opened) { if (!ad_t) ad_t = sceKernelGetProcessTimeWide(); if (!ad_done && sceKernelGetProcessTimeWide() - ad_t > 3000000ULL) { char d[160]; player_audio_diag(d, sizeof d); crumb("lettore: %s", d); ad_done = 1; } } else { ad_t = 0; ad_done = 0; } }   // l'audio parte appena il file e' scaricato
   if (vp.audio && (screen != S_CHAT || (vp.state == 2 && player_ended()))) vp_stop();
   if (!vp_touched && !vp.audio) vp_stop(); vp_touched = 0;
   if (!xfer.active) return;

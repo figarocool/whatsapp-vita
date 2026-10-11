@@ -365,7 +365,7 @@ function convertForVita(jid, id) {
   const pr = (async () => {
     const m = raws.get(jid)?.get(id); if (!m) throw new Error('messaggio non trovato');
     const src = path.join(VIDEO_DIR, key + '.src'); fs.writeFileSync(src, await download(m)); const tmp = path.join(VIDEO_DIR, key + '.tmp.mp4'); const t0 = Date.now();
-    await new Promise((resolve, reject) => require('child_process').execFile('ffmpeg', ['-y', '-i', src, '-vf', "scale=w='min(720,iw)':h='min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p", '-c:v', 'libx264', '-profile:v', 'main', '-level', '3.1', '-preset', 'veryfast', '-crf', '26', '-maxrate', '1500k', '-bufsize', '3000k', '-r', '30', '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp], { timeout: 300000 }, (e, so, se) => e ? reject(new Error('ffmpeg: ' + String(se || '').slice(-200))) : resolve()));
+    await new Promise((resolve, reject) => require('child_process').execFile('ffmpeg', ['-y', '-i', src, '-vf', "scale=w='min(720,iw)':h='min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p", '-c:v', 'libx264', '-profile:v', 'main', '-level', '3.1', '-preset', 'veryfast', '-crf', '26', '-maxrate', '2500k', '-bufsize', '5000k', '-r', '30', '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp], { timeout: 300000 }, (e, so, se) => e ? reject(new Error('ffmpeg: ' + String(se || '').slice(-200))) : resolve()));
     fs.renameSync(tmp, out); try { fs.unlinkSync(src); } catch (_) {} log('video convertito per la Vita in', Date.now() - t0, 'ms:', fs.statSync(out).size, 'byte'); return out;
   })().finally(() => { converting.delete(key); try { fs.unlinkSync(path.join(VIDEO_DIR, key + '.src')); fs.unlinkSync(path.join(VIDEO_DIR, key + '.tmp.mp4')); } catch (_) {} });
   converting.set(key, pr); return pr;
@@ -374,7 +374,7 @@ function convertForVita(jid, id) {
 // L'app avvia un lavoro (/prep), ne legge lo stato (/prep-status: scarico da WhatsApp, conversione con percentuale) e poi scarica il risultato (/prep-file).
 const preps = new Map();   // chiave -> { state: download|convert|ready|error, pct, file, ext, size, err }
 const sha1hex = (t) => require('crypto').createHash('sha1').update(t).digest('hex');
-const VITA_VF = "scale=w='min(720,iw)':h='min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=16,format=yuv420p";
+const VITA_VF = "scale=w='min(960,iw)':h='min(544,ih)':force_original_aspect_ratio=decrease:force_divisible_by=16,format=yuv420p";
 function probeDuration(file) { return new Promise((res) => require('child_process').execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { timeout: 20000 }, (e, so) => res(e ? 0 : parseFloat(so) || 0))); }
 function runFfmpeg(args, durSec, onPct) {
   return new Promise((resolve, reject) => {
@@ -400,7 +400,7 @@ function prepStart(jid, id, kind) {
       else {
         p.state = 'convert'; p.pct = 0; const dur = await probeDuration(src);
         const args = kind === 'video'
-          ? ['-y', '-i', src, '-vf', VITA_VF, '-c:v', 'libx264', '-profile:v', 'main', '-level', '3.1', '-preset', 'veryfast', '-crf', '26', '-maxrate', '1500k', '-bufsize', '3000k', '-r', '30', '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp]
+          ? ['-y', '-i', src, '-vf', VITA_VF, '-c:v', 'libx264', '-profile:v', 'main', '-level', '3.1', '-preset', 'veryfast', '-crf', '26', '-maxrate', '2500k', '-bufsize', '5000k', '-r', '30', '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp]
           : ['-y', '-i', src, '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-ac', '2', '-ar', '44100', tmp];
         await runFfmpeg(args, dur, (v) => { p.pct = v; }); fs.renameSync(tmp, out);
       }

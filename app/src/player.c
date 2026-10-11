@@ -8,6 +8,7 @@
 #include <malloc.h>
 #include <pthread.h>
 #include <string.h>
+#include <stdio.h>
 #include <unistd.h>
 
 static SceAvPlayerHandle h; static int open_ok, running, audio_port = -1, audio_thr_on;
@@ -28,14 +29,22 @@ static void *t_alloc(void *arg, uint32_t al, uint32_t sz) {
 static void t_free(void *arg, void *p) {
   (void)arg; for (int i = 0; i < 24; i++) if (tex_blk[i].base == p) { vita2d_wait_rendering_done(); sceGxmUnmapMemory(p); sceKernelFreeMemBlock(tex_blk[i].uid); tex_blk[i].base = NULL; return; }
 }
-static unsigned frames_seen; static int seen_active; static unsigned long long open_at;
+static unsigned frames_seen;
+static unsigned a_frames; static int a_ch, a_rate, a_size, a_grain, a_open_rc = 1;
+ static int seen_active; static unsigned long long open_at;
 
 static void *audio_loop(void *arg) {
   (void)arg; SceAvPlayerFrameInfo fi;
   while (running) {
     if (sceAvPlayerGetAudioData(h, &fi) && fi.pData) {
       int ch = fi.details.audio.channelCount ? fi.details.audio.channelCount : 2; unsigned grain = fi.details.audio.size / (ch * 2);
-      if (audio_port < 0 && grain >= 64) audio_port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, (int)grain, (int)fi.details.audio.sampleRate, ch == 1 ? SCE_AUDIO_OUT_MODE_MONO : SCE_AUDIO_OUT_MODE_STEREO);
+      a_frames++; a_ch = ch; a_rate = (int)fi.details.audio.sampleRate; a_size = (int)fi.details.audio.size; a_grain = (int)grain;
+      if (audio_port < 0) {
+        audio_port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, (int)grain, a_rate, ch == 1 ? SCE_AUDIO_OUT_MODE_MONO : SCE_AUDIO_OUT_MODE_STEREO);
+        if (audio_port < 0) audio_port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, 1024, 48000, SCE_AUDIO_OUT_MODE_STEREO);   // formato standard dei decodificatori Sony
+        a_open_rc = audio_port;
+        if (audio_port >= 0) { int vol[2] = { SCE_AUDIO_OUT_MAX_VOL, SCE_AUDIO_OUT_MAX_VOL }; sceAudioOutSetVolume(audio_port, SCE_AUDIO_VOLUME_FLAG_L_CH | SCE_AUDIO_VOLUME_FLAG_R_CH, vol); }
+      }
       if (audio_port >= 0) sceAudioOutOutput(audio_port, fi.pData);
     } else usleep(4000);
   }
@@ -90,3 +99,5 @@ int player_ended(void) {
   if (seen_active) return 1;   // era partito ed ora si e' fermato = finito
   return sceKernelGetProcessTimeWide() - open_at > 15ULL * 1000000ULL;   // mai partito entro 15 s: rinuncia
 }
+void player_size(unsigned *w, unsigned *h2) { *w = tex_w; *h2 = tex_h; }
+void player_audio_diag(char *out, int n) { snprintf(out, n, "audio: frames=%u ch=%d rate=%d size=%d grain=%d porta=%d", a_frames, a_ch, a_rate, a_size, a_grain, a_open_rc); }

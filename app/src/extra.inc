@@ -781,10 +781,16 @@ static int vp_draw(float x, float y, float w, float h) {
   vita2d_texture *t = vp.state == 2 ? player_frame() : NULL;
   { static unsigned long long t0; static char lk[260]; if (strcmp(lk, vp.key)) { snprintf(lk, sizeof lk, "%s", vp.key); t0 = 0; } if (vp.state == 2 && !t0) t0 = sceKernelGetProcessTimeWide(); if (vp.state == 2 && t0) { if (t && player_frames() == 1) { { unsigned a_ = 0, b_ = 0; player_size(&a_, &b_); crumb("lettore: primo fotogramma %ux%u", a_, b_); } t0 = 1; } else if (t0 > 1000 && !t && sceKernelGetProcessTimeWide() - t0 > 5000000ULL) { crumb("lettore: nessun fotogramma dopo 5 s"); t0 = 1; } } }
   if (t) { unsigned pw_ = 0, ph_ = 0; player_size(&pw_, &ph_); float tw0 = pw_ ? (float)pw_ : vita2d_texture_get_width(t), th0 = ph_ ? (float)ph_ : vita2d_texture_get_height(t), s = fminf(w / tw0, h / th0); vita2d_draw_texture_scale(t, x + (w - tw0 * s) / 2, y + (h - th0 * s) / 2, s, s); return 1; }
-  char b[96]; if (vp.state == 3) snprintf(b, sizeof b, "%s", T("Video non disponibile")); else if (vp.phase == 1) snprintf(b, sizeof b, "%s %d%%", T("Converto per la Vita"), vp.pct); else if (vp.phase == 2) snprintf(b, sizeof b, "%s %d%%", T("Scarico sulla Vita"), vp.pct); else snprintf(b, sizeof b, "%s", T("Scarico da WhatsApp"));
+  // tempi: da quando e' iniziata la fase attuale, per stimare quanto manca
+  static unsigned long long ph_t0; static int ph_last = -1; static char ph_key[260];
+  if (strcmp(ph_key, vp.key) || ph_last != vp.phase) { snprintf(ph_key, sizeof ph_key, "%s", vp.key); ph_last = vp.phase; ph_t0 = sceKernelGetProcessTimeWide(); }
+  int el = (int)((sceKernelGetProcessTimeWide() - ph_t0) / 1000000ULL);
+  char b[96], b2[64] = ""; if (vp.state == 3) snprintf(b, sizeof b, "%s", T("Video non disponibile")); else if (vp.phase == 1) { snprintf(b, sizeof b, "%s %d%%", T("Converto per la Vita"), vp.pct); if (vp.pct >= 5 && el >= 1) snprintf(b2, sizeof b2, T("ancora circa %d s"), (int)((float)el * (100 - vp.pct) / vp.pct) + 1); } else if (vp.phase == 2) snprintf(b, sizeof b, "%s %d%%", T("Scarico sulla Vita"), vp.pct); else { snprintf(b, sizeof b, "%s", T("Scarico da WhatsApp")); if (el >= 2) snprintf(b2, sizeof b2, T("attendo da %d s"), el); }
   float bw = 360, bx = x + (w - bw) / 2, by = y + h / 2 + 30;
-  vita2d_draw_rectangle(bx - 30, by - 50, bw + 60, 96, RGBA8(0, 0, 0, 170)); text((int)(x + (w - tw(18, b)) / 2), (int)by - 38, C_WHITE, 18, b);
-  rrect(bx, by, bw, 12, 6, RGBA8(255, 255, 255, 70)); if (vp.state != 3 && vp.phase) { float f = vp.pct / 100.0f; if (f < 0.04f) f = 0.04f; rrect(bx, by, bw * f, 12, 6, C_GREEN2); }
+  vita2d_draw_rectangle(bx - 30, by - 50, bw + 60, 118, RGBA8(0, 0, 0, 170)); text((int)(x + (w - tw(18, b)) / 2), (int)by - 38, C_WHITE, 18, b);
+  rrect(bx, by, bw, 12, 6, RGBA8(255, 255, 255, 70));
+  if (vp.state != 3) { if (vp.phase) { float f = vp.pct / 100.0f; if (f < 0.04f) f = 0.04f; rrect(bx, by, bw * f, 12, 6, C_GREEN2); } else { float ph = (float)(frame_no % 80) / 80.0f, fw = 90, fx = bx + (bw - fw) * (ph < 0.5f ? ph * 2 : 2 - ph * 2); rrect(fx, by, fw, 12, 6, C_GREEN2); } }
+  if (b2[0]) text((int)(x + (w - tw(15, b2)) / 2), (int)by + 26, RGBA8(220, 220, 220, 255), 15, b2);
   return 0;
 }
 static void draw_xfer_overlay(void) {

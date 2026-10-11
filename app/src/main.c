@@ -149,6 +149,7 @@ static char toast_txt[160]; static int toast_new;
 static volatile int quit_flag, poll_now;
 static int sync_active, sync_pct, sync_chats; static unsigned sync_t0;
 static volatile int scan_pct = -1;
+static unsigned long long last_tap_ms; static int last_tap_id, last_tap_x, last_tap_y;
 static int list_sel, nav_mode, list_sel_dirty, dpad_hold;   // selezione con i tasti direzionali nella lista chat
 static volatile int quit_req;
 static volatile int chat_limit = 40, msg_limit = 30;   // caricamento a blocchi
@@ -1630,7 +1631,13 @@ int main(void) {
     // ---- risoluzione input ----
     Btn *hit = (tap || lp) ? btn_at(tapx, tapy) : NULL;
     int id = hit ? hit->id : B_NONE, arg = hit ? hit->arg : 0;
-    if (tap || lp) crumb("%s id=%d arg=%d schermata=%d", lp ? "pressione lunga" : "tocco", id, arg, screen);
+    if (tap || lp) { crumb("%s id=%d arg=%d schermata=%d x=%d y=%d", lp ? "pressione lunga" : "tocco", id, arg, screen, (int)tapx, (int)tapy); last_tap_ms = sceKernelGetProcessTimeWide() / 1000; last_tap_id = id; last_tap_x = (int)tapx; last_tap_y = (int)tapy; }
+    {   // diagnostica: se l'app viene messa in background (o il sistema la blocca) il tempo fra due fotogrammi salta
+      static unsigned long long prev_us; unsigned long long now_us = sceKernelGetProcessTimeWide();
+      if (prev_us && now_us - prev_us > 1500000ULL) crumb("PAUSA di %llu ms fra due fotogrammi (app in background o bloccata); ultimo tocco %llu ms prima: id=%d x=%d y=%d schermata=%d", (now_us - prev_us) / 1000, now_us / 1000 - last_tap_ms, last_tap_id, last_tap_x, last_tap_y, screen);
+      prev_us = now_us;
+      static int td_prev; int td_now = td.reportNum > 0; if (td_now && !td_prev && td.report[0].x / 2 > 860 && td.report[0].y / 2 < 70) crumb("contatto in alto a destra x=%d y=%d schermata=%d", td.report[0].x / 2, td.report[0].y / 2, screen); td_prev = td_now;
+    }
     if (lp) {
       if (id == B_MSG && arg < 1000 && arg < nmsgs && !menu_open && !viewer_open && !(cur_chat >= 0 && cur_chat < nchats && chats[cur_chat].channel)) { menu_open = 1; snprintf(menu_id, sizeof menu_id, "%s", msgs[arg].id); }
     } else if (tap) switch (id) {

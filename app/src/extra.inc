@@ -762,6 +762,7 @@ static int aud_state(const char *jid, const char *id, int *pct, int *secs) {
 // disegna il video (o lo stato della preparazione) nel riquadro; 1 se si vede il filmato
 static int vp_draw(float x, float y, float w, float h) {
   vita2d_texture *t = vp.state == 2 ? player_frame() : NULL;
+  { static unsigned long long t0; static char lk[260]; if (strcmp(lk, vp.key)) { snprintf(lk, sizeof lk, "%s", vp.key); t0 = 0; } if (vp.state == 2 && !t0) t0 = sceKernelGetProcessTimeWide(); if (vp.state == 2 && t0) { if (t && player_frames() == 1) { crumb("lettore: primo fotogramma %dx%d", (int)vita2d_texture_get_width(t), (int)vita2d_texture_get_height(t)); t0 = 1; } else if (t0 > 1000 && !t && sceKernelGetProcessTimeWide() - t0 > 5000000ULL) { crumb("lettore: nessun fotogramma dopo 5 s"); t0 = 1; } } }
   if (t) { float tw0 = vita2d_texture_get_width(t), th0 = vita2d_texture_get_height(t), s = fminf(w / tw0, h / th0); vita2d_draw_texture_scale(t, x + (w - tw0 * s) / 2, y + (h - th0 * s) / 2, s, s); return 1; }
   char b[96]; if (vp.state == 3) snprintf(b, sizeof b, "%s", T("Video non disponibile")); else if (vp.phase == 1) snprintf(b, sizeof b, "%s %d%%", T("Converto per la Vita"), vp.pct); else if (vp.phase == 2) snprintf(b, sizeof b, "%s %d%%", T("Scarico sulla Vita"), vp.pct); else snprintf(b, sizeof b, "%s", T("Scarico da WhatsApp"));
   float bw = 360, bx = x + (w - bw) / 2, by = y + h / 2 + 30;

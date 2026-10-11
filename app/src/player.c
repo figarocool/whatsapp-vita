@@ -3,6 +3,7 @@
 #include <psp2/audioout.h>
 #include <psp2/sysmodule.h>
 #include <psp2/gxm.h>
+#include <psp2/kernel/sysmem.h>
 #include <malloc.h>
 #include <pthread.h>
 #include <string.h>
@@ -13,6 +14,20 @@ static pthread_t audio_thr; static vita2d_texture *tex; static unsigned tex_w, t
 
 static void *a_alloc(void *arg, uint32_t al, uint32_t sz) { (void)arg; return memalign(al < 16 ? 16 : al, sz); }
 static void a_free(void *arg, void *p) { (void)arg; free(p); }
+// i fotogrammi li scrive il decodificatore hardware: serve memoria CDRAM visibile al GPU (come negli esempi di SceAvPlayer)
+static struct { void *base; SceUID uid; } tex_blk[24];
+static void *t_alloc(void *arg, uint32_t al, uint32_t sz) {
+  (void)arg; (void)al; sz = (sz + 0x3FFFF) & ~0x3FFFFu;
+  SceUID u = sceKernelAllocMemBlock("avp_frame", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, sz, NULL); if (u < 0) return NULL;
+  void *b = NULL; if (sceKernelGetMemBlockBase(u, &b) < 0 || !b) { sceKernelFreeMemBlock(u); return NULL; }
+  sceGxmMapMemory(b, sz, SCE_GXM_MEMORY_ATTRIB_READ);
+  for (int i = 0; i < 24; i++) if (!tex_blk[i].base) { tex_blk[i].base = b; tex_blk[i].uid = u; return b; }
+  sceGxmUnmapMemory(b); sceKernelFreeMemBlock(u); return NULL;
+}
+static void t_free(void *arg, void *p) {
+  (void)arg; for (int i = 0; i < 24; i++) if (tex_blk[i].base == p) { vita2d_wait_rendering_done(); sceGxmUnmapMemory(p); sceKernelFreeMemBlock(tex_blk[i].uid); tex_blk[i].base = NULL; return; }
+}
+static unsigned frames_seen;
 
 static void *audio_loop(void *arg) {
   (void)arg; SceAvPlayerFrameInfo fi;
@@ -30,12 +45,12 @@ int player_open(const char *path, int loop) {
   player_close();
   sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
   SceAvPlayerInitData d; memset(&d, 0, sizeof d);
-  d.memoryReplacement.allocate = a_alloc; d.memoryReplacement.deallocate = a_free; d.memoryReplacement.allocateTexture = a_alloc; d.memoryReplacement.deallocateTexture = a_free;
+  d.memoryReplacement.allocate = a_alloc; d.memoryReplacement.deallocate = a_free; d.memoryReplacement.allocateTexture = t_alloc; d.memoryReplacement.deallocateTexture = t_free;
   d.basePriority = 0xA0; d.numOutputVideoFrameBuffers = 3; d.autoStart = 1; d.debugLevel = 0;
   h = sceAvPlayerInit(&d); if (!h || ((unsigned)h >> 16) == 0x806A) { int er = (int)h; h = 0; return er ? er : -1; }   // l'handle e' un puntatore (anche con il bit alto acceso): errori solo 0 e 0x806Axxxx
   int ar = sceAvPlayerAddSource(h, path); if (ar < 0) { sceAvPlayerClose(h); h = 0; return ar; }
   sceAvPlayerSetLooping(h, loop ? 1 : 0);
-  open_ok = 1; running = 1; audio_thr_on = pthread_create(&audio_thr, NULL, audio_loop, NULL) == 0;
+  frames_seen = 0; open_ok = 1; running = 1; audio_thr_on = pthread_create(&audio_thr, NULL, audio_loop, NULL) == 0;
   return 0;
 }
 
@@ -49,23 +64,23 @@ void player_close(void) {
 
 int player_active(void) { return open_ok; }
 
+static void *cur_data;
 vita2d_texture *player_frame(void) {
   if (!open_ok) return NULL;
   SceAvPlayerFrameInfo fi;
   if (sceAvPlayerGetVideoData(h, &fi) && fi.pData) {
     unsigned w = fi.details.video.width, hh = fi.details.video.height;
-    if (w && hh && (w != tex_w || hh != tex_h || !tex)) {
-      if (tex) { vita2d_wait_rendering_done(); vita2d_free_texture(tex); }
-      unsigned bytes = w * hh * 3 / 2; tex = vita2d_create_empty_texture(w, (bytes / 4 + w - 1) / w + 1);   // serve solo come memoria per il GPU
-      if (!tex) { tex_w = tex_h = 0; return NULL; }
-      sceGxmTextureInitLinear(&tex->gxm_tex, vita2d_texture_get_datap(tex), SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1, w, hh, 0);
-      sceGxmTextureSetMinFilter(&tex->gxm_tex, SCE_GXM_TEXTURE_FILTER_LINEAR); sceGxmTextureSetMagFilter(&tex->gxm_tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
-      tex_w = w; tex_h = hh;
+    if (w && hh) {
+      if (!tex) tex = vita2d_create_empty_texture(8, 8);   // serve solo come contenitore del descrittore GPU
+      if (tex) {
+        sceGxmTextureInitLinear(&tex->gxm_tex, fi.pData, SCE_GXM_TEXTURE_FORMAT_YVU420P2_CSC1, w, hh, 0);
+        sceGxmTextureSetMinFilter(&tex->gxm_tex, SCE_GXM_TEXTURE_FILTER_LINEAR); sceGxmTextureSetMagFilter(&tex->gxm_tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
+        tex_w = w; tex_h = hh; cur_data = fi.pData; frames_seen++;
+      }
     }
-    if (tex) memcpy(vita2d_texture_get_datap(tex), fi.pData, (size_t)tex_w * tex_h * 3 / 2);
   }
-  return tex;
+  return frames_seen ? tex : NULL;
 }
-
+unsigned player_frames(void) { return frames_seen; }
 unsigned long long player_time_ms(void) { return open_ok ? (unsigned long long)sceAvPlayerCurrentTime(h) : 0; }
 int player_ended(void) { return open_ok && !sceAvPlayerIsActive(h); }

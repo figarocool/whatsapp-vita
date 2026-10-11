@@ -60,12 +60,28 @@ static void *audio_loop(void *arg) {
 // ---- vocali convertiti in WAV dal motore: si riproducono direttamente con sceAudioOut ----
 static int wav_mode, wav_port = -1, wav_ch, wav_rate; static uint8_t *wav_buf; static size_t wav_len, wav_pos; static volatile int wav_done, wav_run; static pthread_t wav_thr; static int wav_thr_on;
 static int is_wav(const uint8_t *b, size_t n) { return n > 44 && !memcmp(b, "RIFF", 4) && !memcmp(b + 8, "WAVE", 4); }
+static char wav_dbg[200];
+extern void player_log(const char *m);
 static void *wav_loop(void *arg) {
-  (void)arg; const int grain = 1024; int bytes = grain * wav_ch * 2; uint8_t *tmp = malloc(bytes);
-  wav_port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, grain, wav_rate, wav_ch == 1 ? SCE_AUDIO_OUT_MODE_MONO : SCE_AUDIO_OUT_MODE_STEREO);
+  // si porta sempre tutto a 48000 Hz stereo: e' l'unico formato che la porta principale accetta ovunque
+  (void)arg; const int grain = 1024; const int nsamp = (int)(wav_len / (wav_ch * 2)); int16_t *src = (int16_t *)wav_buf; int16_t *tmp = malloc(grain * 2 * sizeof(int16_t));
+  wav_port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, grain, 48000, SCE_AUDIO_OUT_MODE_STEREO);
+  snprintf(wav_dbg, sizeof wav_dbg, "vocale: porta audio %d, %d campioni a %d Hz, %d canali", wav_port, nsamp, wav_rate, wav_ch); player_log(wav_dbg);
   if (wav_port >= 0) { int vol[2] = { SCE_AUDIO_OUT_MAX_VOL, SCE_AUDIO_OUT_MAX_VOL }; sceAudioOutSetVolume(wav_port, SCE_AUDIO_VOLUME_FLAG_L_CH | SCE_AUDIO_VOLUME_FLAG_R_CH, vol); }
-  while (wav_run && wav_port >= 0 && wav_pos < wav_len) { size_t k = wav_len - wav_pos < (size_t)bytes ? wav_len - wav_pos : (size_t)bytes; memcpy(tmp, wav_buf + wav_pos, k); if (k < (size_t)bytes) memset(tmp + k, 0, bytes - k); sceAudioOutOutput(wav_port, tmp); wav_pos += k; }
-  free(tmp); wav_done = 1; return NULL;
+  unsigned long long pos = 0, step = ((unsigned long long)wav_rate << 16) / 48000; unsigned blocks = 0; int mx = 0;
+  while (wav_run && wav_port >= 0 && (int)(pos >> 16) < nsamp) {
+    for (int i = 0; i < grain; i++) {
+      int ix = (int)(pos >> 16), fr = (int)(pos & 0xFFFF), jx = ix + 1 < nsamp ? ix + 1 : ix; int l, r;
+      if (ix >= nsamp) { l = r = 0; }
+      else if (wav_ch == 1) { l = r = (src[ix] * (65536 - fr) + src[jx] * fr) >> 16; }
+      else { l = (src[ix * 2] * (65536 - fr) + src[jx * 2] * fr) >> 16; r = (src[ix * 2 + 1] * (65536 - fr) + src[jx * 2 + 1] * fr) >> 16; }
+      if (l > mx) mx = l; tmp[i * 2] = (int16_t)l; tmp[i * 2 + 1] = (int16_t)r; pos += step;
+    }
+    int orr = sceAudioOutOutput(wav_port, tmp); blocks++; if (orr < 0 && blocks < 3) { snprintf(wav_dbg, sizeof wav_dbg, "vocale: sceAudioOutOutput errore 0x%x", (unsigned)orr); player_log(wav_dbg); }
+    wav_pos = (size_t)(pos >> 16) * wav_ch * 2; if (wav_pos > wav_len) wav_pos = wav_len;
+  }
+  snprintf(wav_dbg, sizeof wav_dbg, "vocale: fine, %u blocchi, picco %d", blocks, mx); player_log(wav_dbg);
+  free(tmp); wav_pos = wav_len; wav_done = 1; return NULL;
 }
 static int wav_open(const char *path) {
   SceUID f = sceIoOpen(path, SCE_O_RDONLY, 0); if (f < 0) return -1; SceOff sz = sceIoLseek(f, 0, SCE_SEEK_END); sceIoLseek(f, 0, SCE_SEEK_SET); if (sz < 44 || sz > 40 * 1024 * 1024) { sceIoClose(f); return -1; }

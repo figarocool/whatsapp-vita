@@ -876,7 +876,11 @@ static int vp_draw(float x, float y, float w, float h) {
         else { char bad[330]; snprintf(bad, sizeof bad, "%s.bad", vp.path); sceIoRemove(bad); sceIoRename(vp.path, bad); vp.state = 3; }   // il file si conserva (.bad) per poterlo esaminare
         nf_t0 = 0; } } else nf_t0 = 0; }
   { static unsigned long long t0; static char lk[260]; if (strcmp(lk, vp.key)) { snprintf(lk, sizeof lk, "%s", vp.key); t0 = 0; } if (vp.state == 2 && !t0) t0 = sceKernelGetProcessTimeWide(); if (vp.state == 2 && t0) { if (t && player_frames() == 1) { { unsigned a_ = 0, b_ = 0; player_size(&a_, &b_); crumb("lettore: primo fotogramma %ux%u", a_, b_); } t0 = 1; } else if (t0 > 1000 && !t && sceKernelGetProcessTimeWide() - t0 > 5000000ULL) { crumb("lettore: nessun fotogramma dopo 5 s"); t0 = 1; } } }
-  if (t) { unsigned pw_ = 0, ph_ = 0; player_size(&pw_, &ph_); float tw0 = pw_ ? (float)pw_ : vita2d_texture_get_width(t), th0 = ph_ ? (float)ph_ : vita2d_texture_get_height(t), s = fminf(w / tw0, h / th0); vita2d_draw_texture_scale(t, x + (w - tw0 * s) / 2, y + (h - th0 * s) / 2, s, s); return 1; }
+  if (t) { unsigned pw_ = 0, ph_ = 0; player_size(&pw_, &ph_); float tw0 = pw_ ? (float)pw_ : vita2d_texture_get_width(t), th0 = ph_ ? (float)ph_ : vita2d_texture_get_height(t), s; static char dk[300]; static unsigned dw, dh;
+    if (strcmp(dk, vp.path)) { snprintf(dk, sizeof dk, "%s", vp.path); dw = dh = 0; SceUID df = sceIoOpen(vp.path, SCE_O_RDONLY, 0); if (df >= 0) { static uint8_t hb[524288]; int hn = sceIoRead(df, hb, sizeof hb); sceIoClose(df); Mp4Info mi; if (hn > 100 && video_mp4_info(hb, (size_t)hn, &mi) == 0) { dw = (unsigned)mi.width; dh = (unsigned)mi.height; } } }
+    if (dw && dh && dw <= tw0 && dh <= th0 && (dw != (unsigned)tw0 || dh != (unsigned)th0)) {   // il decodificatore produce blocchi da 16 pixel: si mostra solo la parte vera
+      s = fminf(w / dw, h / dh); vita2d_draw_texture_part_scale(t, x + (w - dw * s) / 2, y + (h - dh * s) / 2, 0, 0, dw, dh, s, s); return 1; }
+    s = fminf(w / tw0, h / th0); vita2d_draw_texture_scale(t, x + (w - tw0 * s) / 2, y + (h - th0 * s) / 2, s, s); return 1; }
   // tempi: da quando e' iniziata la fase attuale, per stimare quanto manca
   static unsigned long long ph_t0; static int ph_last = -1; static char ph_key[260];
   if (strcmp(ph_key, vp.key) || ph_last != vp.phase) { snprintf(ph_key, sizeof ph_key, "%s", vp.key); ph_last = vp.phase; ph_t0 = sceKernelGetProcessTimeWide(); }

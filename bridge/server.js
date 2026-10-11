@@ -406,7 +406,7 @@ function runFfmpeg(args, durSec, onPct, bg, holder) {
   });
 }
 function prepStart(jid, id, kind, bg) {
-  const key = sha1hex(jid + '|' + id + '|' + kind + '|r7'), old = preps.get(key);
+  const key = sha1hex(jid + '|' + id + '|' + kind + '|r8'), old = preps.get(key);
   // se l'utente chiede un file che sta convertendo in background a bassa priorita', si ferma e si rifa' a priorita' normale
   if (old && old.bg && !bg) {
     old.bg = false;   // da ora ha la priorita' dell'utente
@@ -440,7 +440,7 @@ function prepStart(jid, id, kind, bg) {
 // Video in arrivo (storie e chat): si convertono in background, uno alla volta, cosi' sulla Vita sono gia' pronti.
 const bgQueue = []; let bgBusy = false;
 function bgPrep(jid, id) {
-  const key = sha1hex(jid + '|' + id + '|video|r7'); const x = preps.get(key);
+  const key = sha1hex(jid + '|' + id + '|video|r8'); const x = preps.get(key);
   if ((x && x.state !== 'error') || bgQueue.some((t) => t[2] === key)) return;
   if (fs.existsSync(path.join(VIDEO_DIR, key + '.mp4'))) return;
   bgQueue.push([jid, id, key]); bgNext();

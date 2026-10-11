@@ -6,7 +6,7 @@ const u32 = (b, o) => b.readUInt32BE(o);
 function unescapeRbsp(b) { const o = []; for (let i = 0; i < b.length; i++) { if (i >= 2 && b[i] === 3 && b[i - 1] === 0 && b[i - 2] === 0) continue; o.push(b[i]); } return Buffer.from(o); }
 function escapeRbsp(b) { const o = []; let z = 0; for (const x of b) { if (z >= 2 && x <= 3) { o.push(3); z = 0; } o.push(x); z = x === 0 ? z + 1 : 0; } return Buffer.from(o); }
 class BR { constructor(b) { this.b = b; this.p = 0; } bit() { const v = (this.b[this.p >> 3] >> (7 - (this.p & 7))) & 1; this.p++; return v; } bits(n) { let v = 0; while (n--) v = v * 2 + this.bit(); return v; } ue() { let z = 0; while (this.bit() === 0 && z < 32) z++; return z ? (2 ** z) - 1 + this.bits(z) : 0; } se() { const k = this.ue(); return k & 1 ? (k + 1) / 2 : -k / 2; } }
-// rbsp senza il byte di intestazione NAL; ritorna la posizione del bit vui_parameters_present_flag, o -1
+// rbsp senza il byte di intestazione NAL; ritorna le posizioni dei bit frame_cropping_flag e vui_parameters_present_flag
 function vuiFlagPos(rb) {
   const r = new BR(rb); const prof = r.bits(8); r.bits(16); r.ue();
   if ([100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135].includes(prof)) {
@@ -16,18 +16,20 @@ function vuiFlagPos(rb) {
   r.ue(); const poc = r.ue();
   if (poc === 0) r.ue(); else if (poc === 1) { r.bit(); r.se(); r.se(); const n = r.ue(); for (let i = 0; i < n; i++) r.se(); }
   r.ue(); r.bit(); r.ue(); r.ue(); const fm = r.bit(); if (!fm) r.bit(); r.bit();
-  if (r.bit()) { r.ue(); r.ue(); r.ue(); r.ue(); }
-  return r.p;
+  const cropPos = r.p; const crop = r.bit();
+  if (crop) { r.ue(); r.ue(); r.ue(); r.ue(); }
+  return { cropPos, crop, vuiPos: r.p };
 }
-function stripVui(sps) {   // sps = NAL completo (con intestazione); ritorna il nuovo NAL o null se non serve/non si puo'
-  const rb = unescapeRbsp(sps.subarray(1)); let pos; try { pos = vuiFlagPos(rb); } catch (_) { return null; }
-  if (pos < 0 || pos >= rb.length * 8 || !((rb[pos >> 3] >> (7 - (pos & 7))) & 1)) return null;
-  const nb = Math.floor(pos / 8) + 1, out = Buffer.alloc(nb); rb.copy(out, 0, 0, nb);
-  out[pos >> 3] &= ~(1 << (7 - (pos & 7)));                     // vui_parameters_present_flag = 0
-  const tp = pos + 1; out[tp >> 3] |= 1 << (7 - (tp & 7));      // bit di chiusura (rbsp_stop_one_bit)
-  if ((tp >> 3) + 1 < out.length) out.fill(0, (tp >> 3) + 1); else if ((tp & 7) === 7 && false) {}
-  const used = (tp >> 3) + 1; const nal = Buffer.concat([sps.subarray(0, 1), escapeRbsp(out.subarray(0, used))]);
-  return nal;
+function stripVui(sps) {   // sps = NAL completo (con intestazione); toglie ritaglio e VUI. Ritorna il nuovo NAL o null se non c'e' niente da togliere
+  const rb = unescapeRbsp(sps.subarray(1)); let P; try { P = vuiFlagPos(rb); } catch (_) { return null; }
+  const bitAt = (p) => (rb[p >> 3] >> (7 - (p & 7))) & 1;
+  if (P.vuiPos >= rb.length * 8) return null;
+  const hasVui = bitAt(P.vuiPos); if (!hasVui && !P.crop) return null;
+  // nuovo flusso di bit: tutto fino a frame_cropping_flag, poi crop=0, vui=0, bit di chiusura
+  const bits = []; for (let p = 0; p < P.cropPos; p++) bits.push(bitAt(p)); bits.push(0, 0, 1);
+  while (bits.length & 7) bits.push(0);
+  const out = Buffer.alloc(bits.length >> 3); for (let i = 0; i < bits.length; i++) if (bits[i]) out[i >> 3] |= 1 << (7 - (i & 7));
+  return Buffer.concat([sps.subarray(0, 1), escapeRbsp(out)]);
 }
 function findBox(b, start, end, type) { for (let o = start; o + 8 <= end;) { let s = u32(b, o); const t = b.toString('latin1', o + 4, o + 8); if (s === 1) s = Number(b.readBigUInt64BE(o + 8)); if (s < 8) return null; if (t === type) return { o, s }; o += s; } return null; }
 export function fixMp4(b, maxLevel = 41) {   // ritorna { buf, notes } oppure null se non c'e' niente da fare
@@ -52,8 +54,8 @@ export function fixMp4(b, maxLevel = 41) {   // ritorna { buf, notes } oppure nu
     const sl = buf.readUInt16BE(a + 14), sp = a + 16; const spsBuf = buf.subarray(sp, sp + sl);
     if (spsBuf[3] > maxLevel) { buf = Buffer.from(buf); buf[sp + 3] = maxLevel; spsBuf[3] = maxLevel; }
     const nn = stripVui(Buffer.from(spsBuf));
-    if (nn && nn.length < sl) {
-      delta = sl - nn.length; notes.push('VUI tolto dall\'SPS (-' + delta + ' byte)');
+    if (nn && nn.length <= sl) {
+      delta = sl - nn.length; notes.push('ritaglio/VUI tolti dall\'SPS (-' + delta + ' byte)');
       const nb = Buffer.concat([buf.subarray(0, sp), nn, buf.subarray(sp + sl)]); nb.writeUInt16BE(nn.length, a + 14);
       for (const q of found.path.concat([a])) nb.writeUInt32BE(u32(nb, q) - delta, q);   // le dimensioni dei contenitori
       buf = nb; changed = true;

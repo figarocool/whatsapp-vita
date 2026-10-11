@@ -17,6 +17,15 @@ function runFfmpeg(args) {   // ritorna { code, durationUs, err }
   const ht = headTail(src, st.size); const vi = N.mp4Info(ht);
   console.log('video: ' + (vi ? `${vi.codec} ${vi.width}x${vi.height} profilo ${vi.profile} livello ${vi.level}` : 'formato non riconosciuto (non MP4?)') + ', ' + Math.round(st.size / 1024) + ' KB');
   if (!N.videoPlayable(ht)) return { code: 1, err: 'video HEVC: formato non supportato dalla Vita' };
+  if (vi && vi.codec.startsWith('avc') && vi.level > 41) {   // il decodificatore della Vita rifiuta i livelli H.264 alti (es. 5.1) anche per video piccoli: si corregge il livello dichiarato, il flusso non cambia
+    const b = Buffer.from(N.fsRead(src)); let n = 0;
+    for (let k = b.indexOf('avcC'); k >= 0 && k + 12 < b.length; k = b.indexOf('avcC', k + 4)) {
+      if (b[k + 7] > 41) { b[k + 7] = 41; n++; }
+      if ((b[k + 9] & 0x1f) > 0 && b[k + 15] > 41) { b[k + 15] = 41; n++; }   // SPS dentro avcC: nal, profilo, compat, livello
+    }
+    console.log('video: livello H.264 ' + vi.level + ' portato a 41 (' + n + ' punti)');
+    return N.fsWrite(out, b) ? { code: 0, durationUs: 0 } : { code: 1, err: 'scrittura fallita' };
+  }
   return N.fsCopy(src, out) ? { code: 0, durationUs: 0 } : { code: 1, err: 'copia fallita' };
 }
 const argsOf = (cmd, args) => { if (cmd === 'nice') { const k = args.indexOf('ffmpeg'); return k >= 0 ? ['ffmpeg', args.slice(k + 1)] : [args[0], args.slice(1)]; } return [cmd, args]; };

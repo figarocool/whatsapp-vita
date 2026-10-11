@@ -1425,7 +1425,7 @@ int main(void) {
         int ai = -1; float off = 0;
         for (int i = 0; i < nmsgs; i++) { if (!strcmp(msgs[i].id, anchor_id)) { ai = i; break; } off += msgs[i].h + (msgs[i].nreact ? 18 : 0) + 6; }
         if (ai > 0) { chat_scroll += off; anchor_id[0] = 0; older_pending = 0; crumb("messaggi piu' vecchi caricati: +%d (totale %d)", ai, nmsgs); }
-        else if (msgs_gen >= gen_req + 3) { anchor_id[0] = 0; older_pending = 0; no_more_older = 1; crumb("nessun messaggio piu' vecchio"); }
+        else if (msgs_gen >= gen_req + 8) { anchor_id[0] = 0; older_pending = 0; no_more_older = 1; crumb("nessun messaggio piu' vecchio"); }
       }
       float viewh = boty - topy; float maxs = total > viewh ? total - viewh : 0;
       if (fresh && !older_pending && !no_more_older && !chat_stick && chat_scroll < 60 && nmsgs >= msg_limit && msg_limit < 300 && nmsgs > 0) {

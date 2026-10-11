@@ -201,7 +201,7 @@ function addMessage(m, live) {
   if (list.has(m.key.id)) { Object.assign(list.get(m.key.id), { status: m.status ?? list.get(m.key.id).status }); return; }
   m.messageTimestamp = ts; dirtyMeta = true; dirtyChats.add(jid);
   list.set(m.key.id, m);
-  if (list.size > 300) list.delete(list.keys().next().value);
+  if (list.size > 600) { let ok = null, ot = Infinity; for (const [k, x] of list) { const t = num(x.messageTimestamp); if (t < ot) { ot = t; ok = k; } } if (ok) list.delete(ok); }
   const c = chats.get(jid) || { jid, name: nameFor(jid) || jid.split('@')[0], unread: 0 };
   if (ts >= (c.ts || 0)) { c.last = preview(d); c.ts = ts; }
   if (live && !fromMe) {
@@ -216,6 +216,7 @@ function addMessage(m, live) {
 const STORE_OLD = path.join(DATA, 'store.json');
 const STORE_DIR = path.join(DATA, 'store'); fs.mkdirSync(STORE_DIR, { recursive: true });
 const META = path.join(STORE_DIR, 'meta.json');
+const oldAsked = new Map();
 const dirtyChats = new Set(); let dirtyMeta = false, lastMetaSave = 0;
 const chatFile = (jid) => path.join(STORE_DIR, 'c_' + Buffer.from(jid).toString('base64url') + '.json');
 function writeAtomic(file, text) { fs.writeFileSync(file + '.tmp', text); fs.renameSync(file + '.tmp', file); }
@@ -584,7 +585,14 @@ http.createServer(async (req, res) => {
     if (p.startsWith('/messages/')) {
       const jid = arg('/messages/'); prefetchChat(jid, ENGINE ? 4 : 12);
       const list = [...(raws.get(jid)?.values() || [])].sort((a, b) => num(a.messageTimestamp) - num(b.messageTimestamp));
-      const nlim = Math.min(300, parseInt(q.get('n') || '30', 10)); return json(res, 200, list.slice(-nlim).map((m) => { const v = view(m); if (v.text && v.text.length > 1800) v.text = v.text.slice(0, 1800) + '...'; return v; }));
+      const nlim = Math.min(300, parseInt(q.get('n') || '30', 10));
+      // l'app chiede piu' messaggi di quelli che ci sono: si chiedono al telefono quelli piu' vecchi (arrivano come pacchetto di cronologia)
+      if (list.length > 0 && list.length < nlim + 1 && sock && !oldAsked.has(jid)) {
+        oldAsked.set(jid, Date.now()); const o = list[0];
+        sock.fetchMessageHistory(50, o.key, num(o.messageTimestamp)).then(() => log('cronologia piu\' vecchia richiesta per', jid)).catch((e) => log('cronologia piu\' vecchia non richiesta:', e.message));
+        setTimeout(() => oldAsked.delete(jid), 45000);
+      }
+      return json(res, 200, list.slice(-nlim).map((m) => { const v = view(m); if (v.text && v.text.length > 1800) v.text = v.text.slice(0, 1800) + '...'; return v; }));
     }
     if (p.startsWith('/read/')) {
       const jid = arg('/read/'); const c = chats.get(jid); if (c) c.unread = 0;

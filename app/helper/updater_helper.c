@@ -3,6 +3,8 @@
 // Schema ripreso da Desktop Mode (core_updater.c); la preparazione del pacchetto (head.bin) viene da VitaShell, GPL-3.0.
 #include <psp2/appmgr.h>
 #include <psp2/display.h>
+#include <psp2/kernel/threadmgr.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/sysmem.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
@@ -18,6 +20,11 @@
 #define FAILURE_FILE "ux0:/data/whatsapp/updates/.install-failed"
 #define VERSION_MARKER "ux0:/data/whatsapp/updates/core-install.tag"
 
+static void hlog(const char *fmt, int a) {   // ux0:data/whatsapp/helper.log: cosa fa l'installatore (serve a capire se la riapertura riesce)
+  char l[160]; int n = snprintf(l, sizeof l, "[%u] ", (unsigned)(sceKernelGetProcessTimeLow() / 1000)); n += snprintf(l + n, sizeof l - n, fmt, a); l[n++] = '\n';
+  sceIoMkdir("ux0:data", 0777); sceIoMkdir("ux0:data/whatsapp", 0777);
+  int fd = sceIoOpen("ux0:data/whatsapp/helper.log", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666); if (fd >= 0) { sceIoWrite(fd, l, n); sceIoClose(fd); }
+}
 static int load_paf(void) {
   uint32_t args[6] = { 0x180000u, UINT32_MAX, UINT32_MAX, 1u, UINT32_MAX, UINT32_MAX }; int result = -1;
   uint32_t option[4] = { (uint32_t)sizeof(option), (uint32_t)&result, UINT32_MAX, UINT32_MAX };
@@ -67,10 +74,17 @@ static void show_screen(void) {
   sceDisplaySetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME);
 }
 int main(void) {
+  hlog("installatore avviato", 0);
   sceAppMgrDestroyOtherApp();
   show_screen();
-  int result = promote_app();
+  int result = promote_app(); hlog("promozione di WhatsApp -> 0x%08X", result);
   if (result < 0) report_failure(result); else sceIoRemove(FAILURE_FILE);
-  sceAppMgrLaunchAppByUri(0xFFFFF, "psgm:play?titleid=" TITLE_ID);
+  // Riapre WhatsApp. Se la prima apertura venisse interrotta (l'app appena installata partiva e si chiudeva subito), la seconda la riporta su:
+  // aprire un'app gia' in esecuzione la riprende soltanto, non ne crea un'altra. L'installatore resta vivo finche' l'app e' ben avviata.
+  int r1 = sceAppMgrLaunchAppByUri(0xFFFFF, "psgm:play?titleid=" TITLE_ID); hlog("prima apertura -> 0x%08X", r1);
+  sceKernelDelayThread(5 * 1000 * 1000);
+  int r2 = sceAppMgrLaunchAppByUri(0xFFFFF, "psgm:play?titleid=" TITLE_ID); hlog("seconda apertura -> 0x%08X", r2);
+  sceKernelDelayThread(3 * 1000 * 1000);
+  hlog("installatore: fine", 0);
   return 0;
 }

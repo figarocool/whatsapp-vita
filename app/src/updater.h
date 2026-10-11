@@ -21,6 +21,7 @@ typedef struct {
   char last_fail_tag[48]; int last_fail_code;   // tentativo precedente fallito per questa versione
 } UpdInfo;
 
+void upd_note(const char *s);      // scrive una riga in ux0:data/whatsapp/update.log
 void upd_init(void);               // legge la versione installata e ripulisce i resti di un aggiornamento precedente
 void upd_cleanup_helper(void);     // da chiamare PRIMA di aprire la grafica (carica moduli di sistema)
 void upd_check(int manual);        // controllo in un thread; manual=1 mostra anche "gia' aggiornato" e gli errori

@@ -1546,7 +1546,7 @@ int main(void) {
     if (screen == S_PROFILE) {
       vita2d_draw_rectangle(0, 0, SW, 60, C_BAR); back_arrow(); btn(0, 0, 70, 60, B_BACK, 0);
       textb(70, 14, C_TEXT, 26, T("Profilo"));
-      { const char *ab_ = T("Informazioni"); int abw = tw(18, ab_) + 56; rrect(SW - abw - 20, 10, abw, 40, 20, C_GREEN2); text(SW - abw - 20 + 28, 20, C_WHITE, 18, ab_); btn(SW - abw - 20, 10, abw, 40, B_ABOUT, 0); }   // in alto a destra: ben visibile
+      { const char *ab_ = T("Informazioni"); int abw = tw(18, ab_) + 56; rrect(SW - abw - 20, 10, abw, 40, 20, C_GREEN2); text(SW - abw - 20 + 28, 20, RGBA8(0, 0, 0, 255), 18, ab_); btn(SW - abw - 20, 10, abw, 40, B_ABOUT, 0); }   // in alto a destra: ben visibile
       draw_avatar(prof.jid[0] ? prof.jid : "me", prof.name, 200, 250, 90);
       vita2d_draw_fill_circle(280, 330, 24, C_GREEN); text(271, 312, C_WHITE, 30, "+"); btn(100, 160, 200, 200, B_PROF_PHOTO, 0);
       text(110, 372, C_SUB, 14, T("Tocca per cambiare foto"));
@@ -1571,7 +1571,7 @@ int main(void) {
         int al = alive_state();
         const char *st = !plugin_cache ? T("Plugin notifiche: non installato") : al == 1 ? T("Plugin notifiche: ATTIVO") : al < 0 ? T("Plugin notifiche: verifica in corso...") : T("Plugin notifiche: installato ma non attivo (riavvia la Vita)");
         text(380, 504, (al == 1 && plugin_cache) ? C_GREEN2 : C_SUB, 14, st); btn(380, 498, 250, 32, B_PLUGIN_DIAG, 0);   // toccando la riga: diagnostica
-        rrect(640, 498, 280, 32, 16, C_BAR); text(640 + (280 - tw(15, T("Prova notifica"))) / 2, 505, C_TEXT, 15, T("Prova notifica")); btn(640, 498, 280, 32, B_NOTIF_TEST, 0); }
+      }
       if (plugin_cache) { rrect(640, 458, 280, 40, 20, C_BAR); text(640 + (280 - tw(16, T("Rimuovi plugin notifiche"))) / 2, 468, C_RED, 16, T("Rimuovi plugin notifiche")); btn(640, 458, 280, 40, B_PLUGIN_RM, 0); }
     }
 

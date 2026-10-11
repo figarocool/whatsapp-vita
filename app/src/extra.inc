@@ -733,22 +733,23 @@ static void lang_select(int i) {   // 0 = automatica, 1.. = lingue
 static void draw_about(void) {
   static vita2d_texture *photo; static int tried;
   if (!photo && !tried) { tried = 1; photo = vita2d_load_PNG_file("app0:assets/author.png"); }
-  vita2d_draw_rectangle(0, 0, SW, 60, C_BAR); back_arrow(); btn(0, 0, 70, 60, B_BACK, 0); textb(70, 14, C_TEXT, 26, T("Informazioni"));
-  if (photo) { float s = 220.0f / vita2d_texture_get_width(photo); vita2d_draw_texture_scale(photo, 50, 110, s, s); }
-  else { vita2d_draw_fill_circle(160, 220, 110, C_BAR); }
-  { char nm[] = "Stefano Basile"; text(160 - tw(22, nm) / 2, 350, C_TEXT, 22, nm); }
-  UpdInfo ui_; upd_snapshot(&ui_); { char vt[96]; snprintf(vt, sizeof vt, T("Versione %s"), ui_.current); text(160 - tw(14, vt) / 2, 384, C_SUB, 14, vt); }
-  const float cx = 320, cw = SW - cx - 30, top = 60;
-  static float about_h = 600; misc_clamp(about_h, SH - top);
+  vita2d_draw_rectangle(0, 0, SW, 60, C_BAR); back_arrow(); btn(0, 0, 70, 60, B_BACK, 0); textb(70, 18, C_TEXT, 22, T("Informazioni"));
+  const float ps = 130;   // lato della foto
+  if (photo) { float s = ps / vita2d_texture_get_width(photo); vita2d_draw_texture_scale(photo, 50, 90, s, s); }
+  else vita2d_draw_fill_circle(50 + ps / 2, 90 + ps / 2, ps / 2, C_BAR);
+  { char nm[] = "Stefano Basile"; text(50 + (int)(ps - tw(16, nm)) / 2, 90 + (int)ps + 14, C_TEXT, 16, nm); }
+  UpdInfo ui_; upd_snapshot(&ui_); { char vt[96]; snprintf(vt, sizeof vt, T("Versione %s"), ui_.current); text(50 + (int)(ps - tw(12, vt)) / 2, 90 + (int)ps + 40, C_SUB, 12, vt); }
+  const float cx = 230, cw = SW - cx - 30, top = 60;
+  static float about_h = 400; misc_clamp(about_h, SH - top);
   vita2d_enable_clipping(); vita2d_set_clip_rectangle(cx - 6, top, SW, SH); clip_y0 = top; clip_y1 = SH;
-  float y = 80 - misc_scroll;
-  textb((int)cx, (int)y, C_GREEN2, 26, T("Creato da Stefano Basile")); y += 46;
-  y = wrap_text(T("Stefano Basile e' nato nel 1984 a San Pancrazio Salentino (Brindisi) ed e' un appassionato di cybercultura. Online dal 1994, nel 2001 ha pubblicato il suo primo script mIRC e ha creato xploit.it, un portale italiano molto noto, definito \"un'enciclopedia dell'hacking italiano\". Oggi e' il fondatore di 8byte, software house italiana che sviluppa Softshop e RistoManager."), (int)cx, (int)y, (int)cw, 18, C_TEXT, 26, 0);
-  y += 24;
-  text((int)cx, (int)y, C_SUB, 14, T("Sito web")); text((int)cx, (int)y + 20, C_GREEN2, 20, "stefanobasile.com"); y += 66;
-  text((int)cx, (int)y, C_SUB, 14, "GitHub"); text((int)cx, (int)y + 20, C_GREEN2, 20, "github.com/figarocool"); y += 66;
-  text((int)cx, (int)y, C_SUB, 14, T("Codice sorgente e altri progetti")); text((int)cx, (int)y + 20, C_GREEN2, 20, "github.com/figarocool/whatsapp-vita");
-  about_h = y + misc_scroll + 70 - top;   // altezza reale del contenuto (usata dal frame dopo per lo scorrimento)
+  float y = 78 - misc_scroll;
+  textb((int)cx, (int)y, C_GREEN2, 19, T("Creato da Stefano Basile")); y += 36;
+  y = wrap_text(T("Stefano Basile e' nato nel 1984 a San Pancrazio Salentino (Brindisi) ed e' un appassionato di cybercultura. Online dal 1994, nel 2001 ha pubblicato il suo primo script mIRC e ha creato xploit.it, un portale italiano molto noto, definito \"un'enciclopedia dell'hacking italiano\". Oggi e' il fondatore di 8byte, software house italiana che sviluppa Softshop e RistoManager."), (int)cx, (int)y, (int)cw, 15, C_TEXT, 22, 0);
+  y += 14;
+  text((int)cx, (int)y, C_SUB, 12, T("Sito web")); text((int)cx, (int)y + 16, C_GREEN2, 16, "stefanobasile.com"); y += 50;
+  text((int)cx, (int)y, C_SUB, 12, "GitHub"); text((int)cx, (int)y + 16, C_GREEN2, 16, "github.com/figarocool"); y += 50;
+  text((int)cx, (int)y, C_SUB, 12, T("Codice sorgente e altri progetti")); text((int)cx, (int)y + 16, C_GREEN2, 16, "github.com/figarocool/whatsapp-vita");
+  about_h = y + misc_scroll + 50 - top;   // altezza reale del contenuto (usata dal frame dopo per lo scorrimento)
   vita2d_disable_clipping(); clip_y0 = 0; clip_y1 = SH;
 }
 static void draw_lang(void) {

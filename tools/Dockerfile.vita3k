@@ -1,0 +1,4 @@
+FROM archlinux:latest
+RUN pacman -Syu --noconfirm --needed mesa vulkan-radeon libglvnd libx11 libxcb libxkbcommon-x11 xcb-util-cursor alsa-lib libpulse sdl3 fontconfig freetype2 libxrandr libxi libxcursor libsm libice python ttf-dejavu noto-fonts noto-fonts-cjk noto-fonts-emoji 2>&1 | tail -3
+RUN useradd -u 1000 -m stefano
+RUN fc-cache -f

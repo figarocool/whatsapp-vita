@@ -1,6 +1,7 @@
 #include "player.h"
 #include <psp2/avplayer.h>
 #include <psp2/audioout.h>
+#include <psp2/io/fcntl.h>
 #include <psp2/sysmodule.h>
 #include <psp2/gxm.h>
 #include <psp2/kernel/processmgr.h>
@@ -55,8 +56,30 @@ static void *audio_loop(void *arg) {
   return NULL;
 }
 
+
+// ---- vocali convertiti in WAV dal motore: si riproducono direttamente con sceAudioOut ----
+static int wav_mode, wav_port = -1, wav_ch, wav_rate; static uint8_t *wav_buf; static size_t wav_len, wav_pos; static volatile int wav_done, wav_run; static pthread_t wav_thr; static int wav_thr_on;
+static int is_wav(const uint8_t *b, size_t n) { return n > 44 && !memcmp(b, "RIFF", 4) && !memcmp(b + 8, "WAVE", 4); }
+static void *wav_loop(void *arg) {
+  (void)arg; const int grain = 1024; int bytes = grain * wav_ch * 2; uint8_t *tmp = malloc(bytes);
+  wav_port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, grain, wav_rate, wav_ch == 1 ? SCE_AUDIO_OUT_MODE_MONO : SCE_AUDIO_OUT_MODE_STEREO);
+  if (wav_port >= 0) { int vol[2] = { SCE_AUDIO_OUT_MAX_VOL, SCE_AUDIO_OUT_MAX_VOL }; sceAudioOutSetVolume(wav_port, SCE_AUDIO_VOLUME_FLAG_L_CH | SCE_AUDIO_VOLUME_FLAG_R_CH, vol); }
+  while (wav_run && wav_port >= 0 && wav_pos < wav_len) { size_t k = wav_len - wav_pos < (size_t)bytes ? wav_len - wav_pos : (size_t)bytes; memcpy(tmp, wav_buf + wav_pos, k); if (k < (size_t)bytes) memset(tmp + k, 0, bytes - k); sceAudioOutOutput(wav_port, tmp); wav_pos += k; }
+  free(tmp); wav_done = 1; return NULL;
+}
+static int wav_open(const char *path) {
+  SceUID f = sceIoOpen(path, SCE_O_RDONLY, 0); if (f < 0) return -1; SceOff sz = sceIoLseek(f, 0, SCE_SEEK_END); sceIoLseek(f, 0, SCE_SEEK_SET); if (sz < 44 || sz > 40 * 1024 * 1024) { sceIoClose(f); return -1; }
+  uint8_t *b = malloc((size_t)sz); if (!b || sceIoRead(f, b, (size_t)sz) != sz) { sceIoClose(f); free(b); return -1; } sceIoClose(f); if (!is_wav(b, (size_t)sz)) { free(b); return -1; }
+  size_t i = 12; int ch = 0, rate = 0, bits = 0; size_t doff = 0, dlen = 0;
+  while (i + 8 <= (size_t)sz) { uint32_t cl = b[i + 4] | (b[i + 5] << 8) | (b[i + 6] << 16) | ((uint32_t)b[i + 7] << 24); if (!memcmp(b + i, "fmt ", 4) && i + 8 + 16 <= (size_t)sz) { ch = b[i + 10] | (b[i + 11] << 8); rate = b[i + 12] | (b[i + 13] << 8) | (b[i + 14] << 16) | ((uint32_t)b[i + 15] << 24); bits = b[i + 22] | (b[i + 23] << 8); } else if (!memcmp(b + i, "data", 4)) { doff = i + 8; dlen = cl; break; } i += 8 + cl + (cl & 1); }
+  if (!doff || (ch != 1 && ch != 2) || bits != 16 || !rate) { free(b); return -1; } if (doff + dlen > (size_t)sz) dlen = (size_t)sz - doff;
+  memmove(b, b + doff, dlen); wav_buf = b; wav_len = dlen; wav_pos = 0; wav_ch = ch; wav_rate = rate; wav_done = 0; wav_run = 1; wav_mode = 1; wav_thr_on = pthread_create(&wav_thr, NULL, wav_loop, NULL) == 0; return 0;
+}
+static void wav_close(void) { if (!wav_mode) return; wav_run = 0; if (wav_thr_on) pthread_join(wav_thr, NULL); wav_thr_on = 0; if (wav_port >= 0) { sceAudioOutReleasePort(wav_port); wav_port = -1; } free(wav_buf); wav_buf = NULL; wav_mode = 0; }
+
 int player_open(const char *path, int loop) {
   player_close();
+  if (wav_open(path) == 0) return 0;   // vocale WAV: niente AvPlayer
   sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
   SceAvPlayerInitData d; memset(&d, 0, sizeof d);
   d.memoryReplacement.allocate = a_alloc; d.memoryReplacement.deallocate = a_free; d.memoryReplacement.allocateTexture = t_alloc; d.memoryReplacement.deallocateTexture = t_free;
@@ -69,6 +92,7 @@ int player_open(const char *path, int loop) {
 }
 
 void player_close(void) {
+  wav_close();
   if (!open_ok) return;
   running = 0; if (audio_thr_on) pthread_join(audio_thr, NULL); audio_thr_on = 0;
   sceAvPlayerStop(h); sceAvPlayerClose(h); h = 0; open_ok = 0;
@@ -76,11 +100,11 @@ void player_close(void) {
   if (tex) { vita2d_wait_rendering_done(); vita2d_free_texture(tex); tex = NULL; } tex_w = tex_h = 0;
 }
 
-int player_active(void) { return open_ok; }
+int player_active(void) { return open_ok || wav_mode; }
 
 static void *cur_data;
 vita2d_texture *player_frame(void) {
-  if (!open_ok) return NULL;
+  if (wav_mode || !open_ok) return NULL;
   SceAvPlayerFrameInfo fi;
   if (sceAvPlayerGetVideoData(h, &fi) && fi.pData) {
     unsigned w = fi.details.video.width, hh = fi.details.video.height;
@@ -96,8 +120,9 @@ vita2d_texture *player_frame(void) {
   return frames_seen ? tex : NULL;
 }
 unsigned player_frames(void) { return frames_seen; }
-unsigned long long player_time_ms(void) { return open_ok ? (unsigned long long)sceAvPlayerCurrentTime(h) : 0; }
+unsigned long long player_time_ms(void) { if (wav_mode) return (unsigned long long)wav_pos * 1000ULL / ((unsigned long long)wav_rate * wav_ch * 2); return open_ok ? (unsigned long long)sceAvPlayerCurrentTime(h) : 0; }
 int player_ended(void) {
+  if (wav_mode) return wav_done;
   if (!open_ok) return 0;
   if (sceAvPlayerIsActive(h)) { seen_active = 1; return 0; }
   if (seen_active) return 1;   // era partito ed ora si e' fermato = finito

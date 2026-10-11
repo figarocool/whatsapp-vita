@@ -1,5 +1,6 @@
 #pragma once
 #include <stddef.h>
+struct Engine; void net_set_engine(struct Engine *e);   // motore interno: richieste a engine://local/...
 int net_start(void);
 // GET/POST su base_url+path. Ritorna 0 e buffer malloc (da free) in *out, lunghezza in *len.
 int http_get(const char *url, char **out, size_t *len);

@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.10)
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+  set(CMAKE_TOOLCHAIN_FILE "$ENV{VITASDK}/share/vita.toolchain.cmake" CACHE PATH "toolchain")
+endif()
+project(waengine_test C)
+include("$ENV{VITASDK}/share/vita.cmake" REQUIRED)
+set(VITA_APP_NAME "WA Motore (prova)")
+set(VITA_TITLEID "WAENG0001")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -std=gnu11 -Wno-int-conversion -D_GNU_SOURCE")
+file(STRINGS ../quickjs/VERSION QJS_VERSION LIMIT_COUNT 1)
+add_definitions(-DCONFIG_VERSION="${QJS_VERSION}" -DPATH_MAX=256)
+add_executable(waengine_test main.c ../../app/src/sharedfb_stub.c ../src/engine.c ../quickjs/quickjs.c ../quickjs/cutils.c ../quickjs/dtoa.c ../quickjs/libregexp.c ../quickjs/libunicode.c)
+target_include_directories(waengine_test PRIVATE ../src ../quickjs)
+target_link_libraries(waengine_test vita2d mbedtls mbedx509 mbedcrypto z m pthread
+  SceDisplay_stub SceGxm_stub SceCtrl_stub SceSysmodule_stub SceNet_stub SceNetCtl_stub SceCommonDialog_stub SceKernelThreadMgr_stub SceAppMgr_stub ScePgf_stub SceAppUtil_stub)
+vita_create_self(waengine_test.self waengine_test UNSAFE)
+set(BUNDLE "${CMAKE_CURRENT_SOURCE_DIR}/../js/engine.min.js" CACHE FILEPATH "bundle JS")
+vita_create_vpk(waengine_test.vpk ${VITA_TITLEID} waengine_test.self VERSION "01.00" NAME "${VITA_APP_NAME}"
+  FILE ${BUNDLE} assets/engine.bundle.js
+  FILE ${CMAKE_CURRENT_SOURCE_DIR}/../../app/assets/cacert.pem assets/cacert.pem)

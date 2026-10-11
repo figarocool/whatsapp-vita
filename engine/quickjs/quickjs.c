@@ -2140,8 +2140,8 @@ static size_t js_def_malloc_usable_size(const void *ptr)
     return malloc_size(ptr);
 #elif defined(_WIN32)
     return _msize((void *)ptr);
-#elif defined(__EMSCRIPTEN__)
-    return 0;
+#elif defined(__EMSCRIPTEN__) || defined(__vita__)
+    return 0;   /* patch Vita: newlib non ha malloc_usable_size */
 #elif defined(__linux__) || defined(__GLIBC__)
     return malloc_usable_size((void *)ptr);
 #else
@@ -47270,9 +47270,13 @@ static int getTimezoneOffset(int64_t time)
     }
 #else
     {
+#if defined(__vita__)
+        res = 0;   /* patch Vita: niente tm_gmtoff, fuso orario UTC */
+#else
         struct tm tm;
         localtime_r(&ti, &tm);
         res = -tm.tm_gmtoff / 60;
+#endif
     }
 #endif
     return res;

@@ -1,1 +1,1 @@
-{"name":"vita-wa-engine-js","private":true,"type":"module","scripts":{"build":"node build.mjs"},"dependencies":{"buffer":"^6.0.3","esbuild":"^0.28.2","events":"^3.3.0","path-browserify":"^1.0.1","util":"^0.12.5"}}
+{"name":"vita-wa-engine-js","private":true,"type":"module","scripts":{"build":"node build.mjs"},"dependencies":{"abort-controller":"^3.0.0","buffer":"^6.0.3","esbuild":"^0.28.2","events":"^3.3.0","path-browserify":"^1.0.1","process":"^0.11.10","readable-stream":"^4.8.0","string_decoder":"^1.3.0","util":"^0.12.5"}}

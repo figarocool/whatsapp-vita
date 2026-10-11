@@ -28,5 +28,7 @@ function start() {
   sock.ev.on('messages.upsert', ({ messages }) => { for (const m of messages) console.log('MESSAGGIO da', m.key.remoteJid, ':', m.message?.conversation || m.message?.extendedTextMessage?.text || Object.keys(m.message || {})[0]); });
   sock.ev.on('messaging-history.set', ({ chats, messages, progress }) => console.log('cronologia: chat', (chats || []).length, 'messaggi', (messages || []).length, 'progresso', progress));
   globalThis.__sock = sock;
+  // prova: se esiste send.txt ("jid|testo") il motore invia il messaggio e cancella il file
+  setInterval(async () => { const f = (globalThis.__nat.dataDir || '.') + '/send.txt'; if (!existsSync(f)) return; const t = readFileSync(f, 'utf8'); try { unlinkSync(f); } catch (_) {} const i = t.indexOf('|'); if (i < 0) return; try { const r = await sock.sendMessage(t.slice(0, i), { text: t.slice(i + 1).trim() }); console.log('INVIATO id', r && r.key && r.key.id); } catch (e) { console.log('INVIO FALLITO:', e && e.message, e && e.stack ? String(e.stack).split('\n').slice(0, 5).join(' | ') : ''); } }, 1000);
 }
 start();

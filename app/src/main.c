@@ -24,13 +24,14 @@
 #include <jpeglib.h>
 #include "updater.h"
 #include "player.h"
+#include "engine.h"
 #include "i18n.h"
 #include <psp2/camera.h>
 #include <psp2/kernel/sysmem.h>
 #include "json.h"
 #include "net.h"
 
-int _newlib_heap_size_user = 128 * 1024 * 1024;
+int _newlib_heap_size_user = 210 * 1024 * 1024;
 
 // ---- scala dell'interfaccia: testo, foto, avatar e distanze crescono insieme ----
 // Il codice di disegno ragiona in "unita' logiche"; ogni funzione grafica le moltiplica per UK (scala attuale).
@@ -134,7 +135,7 @@ static vita2d_texture *emo_tex;
 // stato condiviso con il worker di rete
 // ======================================================================
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
-static char base_url[256] = "http://192.168.1.10:8787";
+static char base_url[256] = "engine://local";   // predefinito: motore WhatsApp interno (nessun PC); un indirizzo http:// in config.txt usa invece un bridge sul PC
 static char wa_status[24] = "starting";
 static int net_ok = 0;
 static char *qr_png; static size_t qr_len;
@@ -422,13 +423,29 @@ static void run_job(Job *j, const char *base) {
 }
 
 static void save_base_url(const char *u) {
+  int eng = !strncmp(u, "engine:", 7);
   SceUID f = sceIoOpen("ux0:data/whatsapp/config.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
   if (f >= 0) { sceIoWrite(f, u, strlen(u)); sceIoWrite(f, "\n", 1); sceIoClose(f); }
+  if (eng) { sceIoRemove("ur0:tai/wa_config.txt"); return; }   // con il motore interno il plugin non ha un bridge da interrogare
   f = sceIoOpen("ur0:tai/wa_config.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);   // copia per il plugin: sta in ur0:tai come i file degli altri plugin
   if (f >= 0) { sceIoWrite(f, u, strlen(u)); sceIoWrite(f, "\n", 1); sceIoClose(f); }
 }
+// ---- motore WhatsApp interno (QuickJS + Baileys) in un thread proprio ----
+static Engine *g_engine; static pthread_t engine_th; static int engine_started;
+static void engine_log(const char *l) { crumb("motore: %s", l); }
+static void *engine_main(void *arg) {
+  (void)arg; sceIoMkdir("ux0:data/whatsapp/engine", 0777);
+  g_engine = eng_new("app0:assets/cacert.pem", "ux0:data/whatsapp/engine", engine_log); net_set_engine(g_engine);
+  if (eng_run_module(g_engine, "app0:assets/engine.js") == 0) while (!quit_flag && eng_loop_step(g_engine, 20) > 0) {}
+  crumb("motore fermo"); return NULL;
+}
+static void engine_start(void) {
+  if (engine_started || strncmp(base_url, "engine:", 7)) return; engine_started = 1;
+  pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 4 * 1024 * 1024); pthread_create(&engine_th, &at, engine_main, NULL); pthread_attr_destroy(&at);
+}
 // cerca il bridge (porta 8787) nella stessa sottorete /24 della Vita
 static void scan_bridge(void) {
+  if (!strncmp(base_url, "engine:", 7)) return;   // motore interno: niente da cercare in rete
   SceNetCtlInfo info; if (sceNetCtlInetGetInfo(SCE_NETCTL_INFO_GET_IP_ADDRESS, &info) < 0) return;
   int a, b, c, d; if (sscanf(info.ip_address, "%d.%d.%d.%d", &a, &b, &c, &d) != 4) return;
   for (int i = 1; i < 255 && !quit_flag; i++) {
@@ -1208,6 +1225,7 @@ int main(void) {
     SceUID nl2 = sceIoOpen(LOCKFILE, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (nl2 >= 0) { sceIoWrite(nl2, "1", 1); sceIoClose(nl2); }
   }
   load_config();
+  engine_start();
   {
     SceDateTime lt, ut; SceRtcTick a, b;
     sceRtcGetCurrentClockLocalTime(&lt); sceRtcGetCurrentClock(&ut, 0);
@@ -1310,7 +1328,9 @@ int main(void) {
       textb(60, 70, C_TEXT, 34, T("Usa WhatsApp su PS Vita"));
       const char *steps[] = { T("1. Apri WhatsApp sul telefono"), T("2. Tocca Menu o Impostazioni > Dispositivi collegati"), T("3. Tocca Collega un dispositivo"), T("4. Inquadra il codice QR a destra") };
       for (int i = 0; i < 4; i++) text(60, 140 + i * 40, C_SUB, 21, steps[i]);
-      if (!nok) {
+      if (!nok && !strncmp(base_url, "engine:", 7)) {
+        text(60, 360, C_GREEN2, 22, T("Avvio del motore WhatsApp...")); text(60, 396, C_SUB, 15, T("Puo' volerci qualche secondo."));
+      } else if (!nok) {
         text(60, 360, C_RED, 19, T("Bridge non raggiungibile:")); text(60, 388, C_SUB, 19, base_url);
         if (scan_pct >= 0) { char sc[80]; snprintf(sc, sizeof sc, T("Cerco il bridge in rete... %d%%"), scan_pct); text(60, 420, C_GREEN2, 17, sc); }
         else text(60, 420, C_SUB, 15, T("Avvia il bridge sul PC (porta 8787) e tieni Vita e PC sulla stessa rete."));

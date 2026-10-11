@@ -1,3 +1,3 @@
 import { promises } from './fs.js';
-export const { open, readFile, writeFile, mkdir, readdir, unlink, stat, access, rm, rename, copyFile } = promises;
+export const { open, readFile, writeFile, appendFile, mkdir, readdir, unlink, stat, rename, copyFile, rm, access } = promises;
 export default promises;

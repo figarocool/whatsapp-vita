@@ -11,18 +11,22 @@ set(VITA_APP_NAME "WhatsApp")
 set(VITA_TITLEID  "WHAP00001")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -Wall -std=gnu11")
 
-set(SRCS src/main.c src/json.c src/net.c src/updater.c src/player.c src/i18n.c src/i18n_data.c src/sharedfb_stub.c)
+set(ENGINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../engine)
+set(ENGINE_SRCS ${ENGINE_DIR}/src/engine.c ${ENGINE_DIR}/src/curve25519.c ${ENGINE_DIR}/src/image.c ${ENGINE_DIR}/src/audio.c ${ENGINE_DIR}/quickjs/quickjs.c ${ENGINE_DIR}/quickjs/cutils.c ${ENGINE_DIR}/quickjs/dtoa.c ${ENGINE_DIR}/quickjs/libregexp.c ${ENGINE_DIR}/quickjs/libunicode.c)
+set_source_files_properties(${ENGINE_SRCS} PROPERTIES COMPILE_FLAGS "-w -DPATH_MAX=256 -DCONFIG_VERSION=\\\"engine\\\"")
+include_directories(${ENGINE_DIR}/src ${ENGINE_DIR}/quickjs)
+set(SRCS ${ENGINE_SRCS} src/main.c src/json.c src/net.c src/updater.c src/player.c src/i18n.c src/i18n_data.c src/sharedfb_stub.c)
 add_executable(${PROJECT_NAME} ${SRCS})
 add_executable(whatsapp_safe ${SRCS})
 target_compile_definitions(whatsapp_safe PRIVATE SAFE_BUILD=1)
 target_link_libraries(${PROJECT_NAME}
-  vita2d curl mbedtls mbedx509 mbedcrypto freetype png jpeg zstd bz2 z m pthread SceAppMgr_stub
+  vita2d curl mbedtls mbedx509 mbedcrypto freetype png jpeg webpdemux webp opus ogg zstd bz2 z m pthread SceAppMgr_stub
   SceDisplay_stub SceGxm_stub SceCtrl_stub SceTouch_stub SceSysmodule_stub
   SceCommonDialog_stub SceIme_stub SceCamera_stub SceAppUtil_stub SceNet_stub SceNetCtl_stub
   SceNotificationUtil_stub ScePromoterUtil_stub SceAvPlayer_stub SceAudio_stub
   SceHttp_stub SceSsl_stub SceKernelThreadMgr_stub SceRtc_stub ScePower_stub)
 target_link_libraries(whatsapp_safe
-  vita2d curl mbedtls mbedx509 mbedcrypto freetype png jpeg zstd bz2 z m pthread SceAppMgr_stub
+  vita2d curl mbedtls mbedx509 mbedcrypto freetype png jpeg webpdemux webp opus ogg zstd bz2 z m pthread SceAppMgr_stub
   SceDisplay_stub SceGxm_stub SceCtrl_stub SceTouch_stub SceSysmodule_stub
   SceCommonDialog_stub SceIme_stub SceCamera_stub SceAppUtil_stub SceNet_stub SceNetCtl_stub SceAvPlayer_stub SceAudio_stub
   SceHttp_stub SceSsl_stub SceKernelThreadMgr_stub SceRtc_stub ScePower_stub)
@@ -39,6 +43,7 @@ set(COMMON_FILES
   FILE assets/author.png assets/author.png
   FILE assets/emoji.bin assets/emoji.bin
   FILE assets/cacert.pem assets/cacert.pem
+  FILE ${ENGINE_DIR}/js/bridge.min.js assets/engine.js
   FILE assets/font-ja.ttf assets/font-ja.ttf
   FILE assets/font-ko.ttf assets/font-ko.ttf
   FILE assets/font-zhs.ttf assets/font-zhs.ttf

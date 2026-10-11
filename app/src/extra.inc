@@ -56,14 +56,26 @@ static void people_row(float y, const char *jid, const char *name, const char *l
 }
 static void label_row(float y, const char *t) { text(24, (int)y + 8, C_GREEN2, 16, t); }
 static void icon_circle(float cx, float cy, unsigned col) { vita2d_draw_fill_circle(cx, cy, 26, col); }
+// a capo del testo: le parole si dividono sugli spazi; i caratteri cinesi/giapponesi/coreani (che non hanno spazi) vanno a capo uno per uno
+static int wt_cjk(const unsigned char *p, int *len) {
+  int l = *p < 0x80 ? 1 : *p < 0xE0 ? 2 : *p < 0xF0 ? 3 : 4; *len = l;
+  if (l != 3) return 0;
+  unsigned cp = ((p[0] & 0xFu) << 12) | ((p[1] & 0x3Fu) << 6) | (p[2] & 0x3Fu);
+  return (cp >= 0x3000 && cp < 0xA000) || (cp >= 0xAC00 && cp < 0xD7B0) || (cp >= 0xFF00 && cp < 0xFFF0);
+}
 static void wrap_text(const char *s, int x, int y, int w, int size, unsigned col, int lh, int center) {
-  char line[400] = ""; const char *p = s;
+  char line[400] = ""; const unsigned char *p = (const unsigned char *)s; int prevcj = 0;
   while (*p) {
-    char word[200]; int wl = 0; while (*p && *p != ' ' && *p != '\n' && wl < 190) word[wl++] = *p++; word[wl] = 0;
-    char cand[620]; snprintf(cand, sizeof cand, "%s%s%s", line, line[0] ? " " : "", word);
-    if (line[0] && tw(size, cand) > w) { text(center ? x + (w - tw(size, line)) / 2 : x, y, col, size, line); y += lh; snprintf(line, sizeof line, "%s", word); }
+    if (*p == '\n') { if (line[0]) text(center ? x + (w - tw(size, line)) / 2 : x, y, col, size, line); y += lh; line[0] = 0; prevcj = 0; p++; continue; }
+    if (*p == ' ') { p++; prevcj = 0; continue; }
+    char tok[200]; int tl = 0, l, cj = wt_cjk(p, &l);
+    if (cj) { memcpy(tok, p, l); tl = l; p += l; }
+    else while (*p && *p != ' ' && *p != '\n') { if (wt_cjk(p, &l)) break; if (tl + l > 190) break; memcpy(tok + tl, p, l); tl += l; p += l; }
+    tok[tl] = 0;
+    char cand[620]; snprintf(cand, sizeof cand, "%s%s%s", line, (line[0] && !cj && !prevcj) ? " " : "", tok);
+    if (line[0] && tw(size, cand) > w) { text(center ? x + (w - tw(size, line)) / 2 : x, y, col, size, line); y += lh; snprintf(line, sizeof line, "%s", tok); }
     else snprintf(line, sizeof line, "%s", cand);
-    if (*p == '\n') { text(center ? x + (w - tw(size, line)) / 2 : x, y, col, size, line); y += lh; line[0] = 0; p++; } else if (*p == ' ') p++;
+    prevcj = cj;
   }
   if (line[0]) text(center ? x + (w - tw(size, line)) / 2 : x, y, col, size, line);
 }
@@ -716,6 +728,27 @@ static void lang_select(int i) {   // 0 = automatica, 1.. = lingue
   i18n_set(i == 0 ? -1 : i - 1); ui_gen++; memset(wcache, 0, sizeof wcache); screen = S_PROFILE; misc_scroll = 0;
   crumb("lingua scelta: %s (%d)", i == 0 ? "automatica" : "manuale", i18n_lang());
 }
+// ---------- informazioni sull'autore ----------
+static void draw_about(void) {
+  static vita2d_texture *photo; static int tried;
+  if (!photo && !tried) { tried = 1; photo = vita2d_load_PNG_file("app0:assets/author.png"); }
+  vita2d_draw_rectangle(0, 0, SW, 60, C_BAR); back_arrow(); btn(0, 0, 70, 60, B_BACK, 0); textb(70, 14, C_TEXT, 26, T("Informazioni"));
+  if (photo) { float s = 220.0f / vita2d_texture_get_width(photo); vita2d_draw_texture_scale(photo, 50, 110, s, s); }
+  else { vita2d_draw_fill_circle(160, 220, 110, C_BAR); }
+  { char nm[] = "Stefano Basile"; text(160 - tw(22, nm) / 2, 350, C_TEXT, 22, nm); }
+  UpdInfo ui_; upd_snapshot(&ui_); { char vt[96]; snprintf(vt, sizeof vt, T("Versione %s"), ui_.current); text(160 - tw(14, vt) / 2, 384, C_SUB, 14, vt); }
+  const float cx = 320, cw = SW - cx - 30, top = 60;
+  misc_clamp(560, SH - top);
+  vita2d_enable_clipping(); vita2d_set_clip_rectangle(cx - 6, top, SW, SH); clip_y0 = top; clip_y1 = SH;
+  float y = 80 - misc_scroll;
+  textb((int)cx, (int)y, C_GREEN2, 26, T("Creato da Stefano Basile")); y += 46;
+  wrap_text(T("Stefano Basile e' nato nel 1984 a San Pancrazio Salentino (Brindisi) ed e' un appassionato di cybercultura. Online dal 1994, nel 2001 ha pubblicato il suo primo script mIRC e ha creato xploit.it, un portale italiano molto noto, definito \"un'enciclopedia dell'hacking italiano\". Oggi e' il fondatore di 8byte, software house italiana che sviluppa Softshop e RistoManager."), (int)cx, (int)y, (int)cw, 18, C_TEXT, 26, 0);
+  y += 330;
+  text((int)cx, (int)y, C_SUB, 14, T("Sito web")); text((int)cx, (int)y + 20, C_GREEN2, 20, "stefanobasile.com"); y += 66;
+  text((int)cx, (int)y, C_SUB, 14, "GitHub"); text((int)cx, (int)y + 20, C_GREEN2, 20, "github.com/figarocool"); y += 66;
+  text((int)cx, (int)y, C_SUB, 14, T("Codice sorgente e altri progetti")); text((int)cx, (int)y + 20, C_GREEN2, 20, "github.com/figarocool/whatsapp-vita");
+  vita2d_disable_clipping(); clip_y0 = 0; clip_y1 = SH;
+}
 static void draw_lang(void) {
   vita2d_draw_rectangle(0, 0, SW, 60, C_BAR); back_arrow(); btn(0, 0, 70, 60, B_BACK, 0); textb(70, 14, C_TEXT, 26, T("Scegli la lingua"));
   const float top = 60, rowh = 60; const int n = L_COUNT + 1;
@@ -839,6 +872,7 @@ static void draw_extra_screens(void) {
     case S_CALLS: draw_calls(); break;
     case S_CAMERA: draw_camera(); break;
     case S_LANG: draw_lang(); break;
+    case S_ABOUT: draw_about(); break;
     case S_SEARCH: draw_search(); break;
     case S_NEWCHAT: draw_newchat(); break;
     case S_GROUP: draw_group(); break;
@@ -856,7 +890,7 @@ static void draw_extra_screens(void) {
 static int extra_back(void) {
   switch (screen) {
     case S_CAMERA: cam_stop(); screen = S_PICKER; return 1;
-    case S_LANG: screen = S_PROFILE; misc_scroll = 0; return 1;
+    case S_LANG: case S_ABOUT: screen = S_PROFILE; misc_scroll = 0; return 1;
     case S_SEARCH: screen = search_from == S_CHAT && cur_chat >= 0 ? S_CHAT : S_LIST; misc_scroll = 0; return 1;
     case S_NEWCHAT: screen = S_LIST; return 1;
     case S_GROUP: screen = S_NEWCHAT; misc_scroll = 0; return 1;
@@ -908,6 +942,7 @@ static void handle_extra(int id, int arg) {
     case B_UPD_CANCEL: upd_cancel(); break;
     case B_XFER_CANCEL: xfer.cancel = 1; break;
     case B_LANG: screen = S_LANG; misc_scroll = 0; break;
+    case B_ABOUT: screen = S_ABOUT; misc_scroll = 0; break;
     case B_LANG_ROW: lang_select(arg); break;
     case B_UPD_BLOCK: break;
     case B_COMM_NEW: ime_open(IME_COMM_NAME, T("Nome della community"), ""); break;
@@ -1032,6 +1067,7 @@ static void extra_tick(void) {
         else if (k == 'y') { menu_open = 1; snprintf(menu_id, sizeof menu_id, "%s", msgs[nmsgs - 1].id); }
         else if (k == 'b') { snprintf(draft, sizeof draft, "Ciao, questo e' un messaggio di prova abbastanza lungo"); emoji_open = 1; } } }
     else if (dbg_key == 'p') { dbg_key = 0; screen = S_PROFILE; }
+    else if (dbg_key == 'i') { dbg_key = 0; screen = S_ABOUT; misc_scroll = 0; }
     else if (dbg_key == 'l') { dbg_key = 0; screen = S_LANG; misc_scroll = 0; }
     else if (dbg_key == 'a') { dbg_key = 0; screen = S_PROFILE; popup_open_about(); }
     else if (dbg_key == 'c') { for (int i = 0; i < nchats; i++) if (chats[i].channel) { dbg_key = 0; open_chat(i); break; } } }

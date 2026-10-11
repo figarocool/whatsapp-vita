@@ -36,6 +36,7 @@ set(COMMON_FILES
   FILE sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
   FILE assets/Roboto-Regular.ttf assets/Roboto-Regular.ttf
   FILE assets/emoji.png assets/emoji.png
+  FILE assets/author.png assets/author.png
   FILE assets/emoji.bin assets/emoji.bin
   FILE assets/cacert.pem assets/cacert.pem
   FILE assets/font-ja.ttf assets/font-ja.ttf

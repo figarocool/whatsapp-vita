@@ -983,7 +983,7 @@ static void layout_msg(Msg *m, int maxbw, int showname) {
 // ======================================================================
 // pulsanti dichiarati durante il disegno e risolti a fine frame
 // ======================================================================
-enum { B_NONE, B_ROW, B_CHIP, B_PROFILE, B_BACK, B_MSG, B_EMOJI_BTN, B_SEND, B_ATTACH, B_DRAFT, B_EMO_CELL, B_EMO_BACK, B_EMO_CLOSE, B_MENU_REACT, B_MENU_ITEM, B_MENU_CLOSE, B_VIEW_CLOSE, B_PICK_ENTRY, B_PICK_UP, B_PREVIEW_SEND, B_PREVIEW_CAPTION, B_PREVIEW_CANCEL, B_PROF_NAME, B_PROF_ABOUT, B_PROF_PHOTO, B_CANCEL_REPLY, B_TAB, B_FAB, B_SEARCH_ICON, B_LISTMENU, B_CHATMENU, B_HEADER_INFO, B_POPUP_ITEM, B_POPUP_CLOSE, B_UNBLOCK_BAR, B_SEARCH_BOX, B_SEARCH_ROW, B_NC_GROUP, B_NC_CONTACT, B_NC_ROW, B_GR_SUBJECT, B_GR_ROW, B_GR_CREATE, B_CT_BLOCK, B_MEDIA_TAB, B_MEDIA_ITEM, B_DOC_ITEM, B_UPD_ROW, B_COMM_ROW, B_ST_PREV, B_ST_NEXT, B_LOGOUT, B_PLUGIN, B_PLUGIN_RM, B_BRIDGE_ADDR, B_THEME_UI, B_UPD_MY, B_STORY_NEW, B_FOLLOW_CH, B_ST_VIEWERS, B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT, B_NOTIF_TEST, B_PLUGIN_DIAG , B_CAM_OPEN, B_CAM_SHOT, B_CAM_FLIP, B_COMM_NEW, B_COMM_HEAD, B_UPD_CHECK, B_UPD_CANCEL, B_UPD_BLOCK, B_LANG, B_LANG_ROW, B_XFER_CANCEL, B_ST_SAVE, B_CALL_ROW};
+enum { B_NONE, B_ROW, B_CHIP, B_PROFILE, B_BACK, B_MSG, B_EMOJI_BTN, B_SEND, B_ATTACH, B_DRAFT, B_EMO_CELL, B_EMO_BACK, B_EMO_CLOSE, B_MENU_REACT, B_MENU_ITEM, B_MENU_CLOSE, B_VIEW_CLOSE, B_PICK_ENTRY, B_PICK_UP, B_PREVIEW_SEND, B_PREVIEW_CAPTION, B_PREVIEW_CANCEL, B_PROF_NAME, B_PROF_ABOUT, B_PROF_PHOTO, B_CANCEL_REPLY, B_TAB, B_FAB, B_SEARCH_ICON, B_LISTMENU, B_CHATMENU, B_HEADER_INFO, B_POPUP_ITEM, B_POPUP_CLOSE, B_UNBLOCK_BAR, B_SEARCH_BOX, B_SEARCH_ROW, B_NC_GROUP, B_NC_CONTACT, B_NC_ROW, B_GR_SUBJECT, B_GR_ROW, B_GR_CREATE, B_CT_BLOCK, B_MEDIA_TAB, B_MEDIA_ITEM, B_DOC_ITEM, B_UPD_ROW, B_COMM_ROW, B_ST_PREV, B_ST_NEXT, B_LOGOUT, B_PLUGIN, B_PLUGIN_RM, B_BRIDGE_ADDR, B_THEME_UI, B_UPD_MY, B_STORY_NEW, B_FOLLOW_CH, B_ST_VIEWERS, B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT, B_NOTIF_TEST, B_PLUGIN_DIAG , B_CAM_OPEN, B_CAM_SHOT, B_CAM_FLIP, B_COMM_NEW, B_COMM_HEAD, B_UPD_CHECK, B_UPD_CANCEL, B_UPD_BLOCK, B_LANG, B_LANG_ROW, B_XFER_CANCEL, B_ST_SAVE, B_CALL_ROW, B_ABOUT};
 typedef struct { int x, y, w, h, id, arg; } Btn;
 static Btn btns[400]; static int nb; static int clip_y0 = 0, clip_y1 = 100000;
 static void btn(int x, int y, int w, int h, int id, int arg) {
@@ -1044,7 +1044,7 @@ static void ime_open(int ctx, const char *title, const char *initial) {
 // ======================================================================
 // stato UI
 // ======================================================================
-enum { S_LOGIN, S_LIST, S_CHAT, S_PROFILE, S_PICKER, S_PREVIEW, S_UPDATES, S_COMM, S_CALLS, S_SEARCH, S_NEWCHAT, S_GROUP, S_CONTACT, S_MEDIA, S_STATUSVIEW, S_CAMERA, S_LANG };
+enum { S_LOGIN, S_LIST, S_CHAT, S_PROFILE, S_PICKER, S_PREVIEW, S_UPDATES, S_COMM, S_CALLS, S_SEARCH, S_NEWCHAT, S_GROUP, S_CONTACT, S_MEDIA, S_STATUSVIEW, S_CAMERA, S_LANG, S_ABOUT };
 // scala usata da ciascuna schermata: quelle con disposizione fissa (accesso, profilo, selettore file) restano piu' piccole
 static float screen_scale(int scr) {
   float k = ui_k;
@@ -1566,6 +1566,7 @@ int main(void) {
       const char *nl = !plugin_cache ? T("Installa notifiche") : notif_enabled() ? T("Notifiche: attive") : T("Notifiche: disattivate");
       rrect(640, 400, 280, 48, 24, C_BAR); text(640 + (280 - tw(19, nl)) / 2, 412, plugin_cache && notif_enabled() ? C_GREEN2 : C_SUB, 19, nl); btn(640, 400, 280, 48, B_PLUGIN, 0);
       { const char *tl = ui_dark ? T("Tema: scuro") : T("Tema: chiaro"); rrect(380, 458, 240, 40, 20, C_BAR); text(380 + (240 - tw(16, tl)) / 2, 468, C_TEXT, 16, tl); btn(380, 458, 240, 40, B_THEME_UI, 0); }
+      rrect(640, 458, 280, 40, 20, C_BAR); text(640 + (280 - tw(16, T("Informazioni"))) / 2, 468, C_TEXT, 16, T("Informazioni")); btn(640, 458, 280, 40, B_ABOUT, 0);
       { // stato del plugin: attivo se ha aggiornato il suo file da meno di 40 secondi
         int al = alive_state();
         const char *st = !plugin_cache ? T("Plugin notifiche: non installato") : al == 1 ? T("Plugin notifiche: ATTIVO") : al < 0 ? T("Plugin notifiche: verifica in corso...") : T("Plugin notifiche: installato ma non attivo (riavvia la Vita)");

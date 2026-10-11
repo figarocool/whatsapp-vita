@@ -374,7 +374,9 @@ function convertForVita(jid, id) {
 // L'app avvia un lavoro (/prep), ne legge lo stato (/prep-status: scarico da WhatsApp, conversione con percentuale) e poi scarica il risultato (/prep-file).
 const preps = new Map();   // chiave -> { state: download|convert|ready|error, pct, file, ext, size, err }
 const sha1hex = (t) => require('crypto').createHash('sha1').update(t).digest('hex');
-const VITA_VF = "scale=w='min(720,iw)':h='min(544,ih)':force_original_aspect_ratio=decrease:force_divisible_by=16,format=yuv420p";
+// colori e proporzioni dei pixel sempre normalizzati (bt709, nessun rapporto d'aspetto dei pixel): alcuni video di WhatsApp li hanno incompleti e il decodificatore della Vita li rifiuta
+const VITA_VF = "scale=w='min(720,iw)':h='min(544,ih)':force_original_aspect_ratio=decrease:force_divisible_by=16:out_color_matrix=bt709:out_range=tv,setsar=0,format=yuv420p";
+const VITA_COLOR = ['-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv'];
 function probeDuration(file) { return new Promise((res) => require('child_process').execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { timeout: 20000 }, (e, so) => res(e ? 0 : parseFloat(so) || 0))); }
 function runFfmpeg(args, durSec, onPct, bg, holder) {
   return new Promise((resolve, reject) => {
@@ -389,7 +391,7 @@ function runFfmpeg(args, durSec, onPct, bg, holder) {
   });
 }
 function prepStart(jid, id, kind, bg) {
-  const key = sha1hex(jid + '|' + id + '|' + kind + '|r5'), old = preps.get(key);
+  const key = sha1hex(jid + '|' + id + '|' + kind + '|r7'), old = preps.get(key);
   // se l'utente chiede un file che sta convertendo in background a bassa priorita', si ferma e si rifa' a priorita' normale
   if (old && old.bg && !bg) {
     old.bg = false;   // da ora ha la priorita' dell'utente
@@ -407,7 +409,7 @@ function prepStart(jid, id, kind, bg) {
       else {
         p.state = 'convert'; p.pct = 0; const dur = await probeDuration(src);
         const args = kind === 'video'
-          ? ['-y', '-i', src, '-vf', VITA_VF, '-c:v', 'libx264', '-profile:v', 'main', '-level', '3.1', '-preset', 'veryfast', '-bf', '0', '-refs', '2', '-g', '60', '-crf', '26', '-maxrate', '2500k', '-bufsize', '5000k', '-r', '30', '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp]
+          ? ['-y', '-i', src, '-vf', VITA_VF, ...VITA_COLOR, '-c:v', 'libx264', '-profile:v', 'main', '-level', '3.1', '-preset', 'veryfast', '-bf', '0', '-refs', '2', '-g', '60', '-crf', '26', '-maxrate', '2500k', '-bufsize', '5000k', '-r', '30', '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp]
           : ['-y', '-i', src, '-vn', '-c:a', 'aac', '-b:a', '96k', '-ac', '2', '-ar', '44100', '-movflags', '+faststart', tmp];
         await runFfmpeg(args, dur, (v) => { p.pct = v; }, p.bg, p); fs.renameSync(tmp, out);
       }
@@ -423,7 +425,7 @@ function prepStart(jid, id, kind, bg) {
 // Video in arrivo (storie e chat): si convertono in background, uno alla volta, cosi' sulla Vita sono gia' pronti.
 const bgQueue = []; let bgBusy = false;
 function bgPrep(jid, id) {
-  const key = sha1hex(jid + '|' + id + '|video|r5'); const x = preps.get(key);
+  const key = sha1hex(jid + '|' + id + '|video|r7'); const x = preps.get(key);
   if ((x && x.state !== 'error') || bgQueue.some((t) => t[2] === key)) return;
   if (fs.existsSync(path.join(VIDEO_DIR, key + '.mp4'))) return;
   bgQueue.push([jid, id, key]); bgNext();

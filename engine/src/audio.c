@@ -8,7 +8,7 @@ static void put32(uint8_t *p, uint32_t v) { p[0] = v; p[1] = v >> 8; p[2] = v >>
 int audio_ogg_opus_to_wav(const uint8_t *in, size_t n, uint8_t **out, size_t *outn, double *seconds) {
   if (n < 28 || memcmp(in, "OggS", 4)) return -1;
   ogg_sync_state oy; ogg_stream_state os; ogg_page og; ogg_packet op; OpusDecoder *dec = NULL; int have_stream = 0, packets = 0, channels = 1, preskip = 0, rc = -1;
-  const int RATE = 16000; size_t cap = (size_t)RATE * 2 * 4 + 44, len = 44; uint8_t *wav = malloc(cap); if (!wav) return -1; ogg_sync_init(&oy);
+  const int RATE = 48000; size_t cap = (size_t)RATE * 2 * 4 + 44, len = 44; uint8_t *wav = malloc(cap); if (!wav) return -1; ogg_sync_init(&oy);
   size_t pos = 0; long skip = 0; int done = 0;
   while (!done) {
     while (ogg_sync_pageout(&oy, &og) != 1) {

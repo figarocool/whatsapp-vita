@@ -3,6 +3,7 @@
 // Schema ripreso da Desktop Mode (core_updater.c); la preparazione del pacchetto (head.bin) viene da VitaShell, GPL-3.0.
 #include <psp2/appmgr.h>
 #include <psp2/display.h>
+#include <zlib.h>
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/sysmem.h>
@@ -67,9 +68,12 @@ static int promote_app(void) {
 static void show_screen(void) {
   SceUID blk = sceKernelAllocMemBlock("wa_upd_fb", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 2 * 1024 * 1024, NULL); if (blk < 0) return;
   void *base = NULL; if (sceKernelGetMemBlockBase(blk, &base) < 0 || !base) return;
-  int fd = sceIoOpen("app0:/assets/update-screen.raw", SCE_O_RDONLY, 0); if (fd < 0) return;
-  size_t total = 960 * 544 * 4, got = 0; while (got < total) { int n = sceIoRead(fd, (char *)base + got, total - got); if (n <= 0) break; got += (size_t)n; }
-  sceIoClose(fd); if (got < total) return;
+  // la schermata e' nella lingua scelta nell'app: il codice lo scrive WhatsApp in ur0:tai/wa_upd_lang.txt prima di lanciarci
+  char code[16] = "en", path[96]; { int f = sceIoOpen("ur0:tai/wa_upd_lang.txt", SCE_O_RDONLY, 0); if (f >= 0) { int n = sceIoRead(f, code, sizeof code - 1); sceIoClose(f); if (n > 0) { code[n] = 0; for (char *q = code; *q; q++) if (*q == '\n' || *q == '\r' || *q == ' ') { *q = 0; break; } } } }
+  static unsigned char zbuf[262144]; int zn = 0;
+  for (int t = 0; t < 2 && zn <= 0; t++) { snprintf(path, sizeof path, "app0:/assets/update-screen-%s.z", t ? "en" : code); int fd = sceIoOpen(path, SCE_O_RDONLY, 0); if (fd >= 0) { zn = sceIoRead(fd, zbuf, sizeof zbuf); sceIoClose(fd); } }
+  if (zn <= 0) return;
+  uLongf out = 960 * 544 * 4; if (uncompress((Bytef *)base, &out, zbuf, (uLong)zn) != Z_OK || out != 960 * 544 * 4) return;
   SceDisplayFrameBuf fb; memset(&fb, 0, sizeof fb); fb.size = sizeof fb; fb.base = base; fb.pitch = 960; fb.pixelformat = SCE_DISPLAY_PIXELFORMAT_A8B8G8R8; fb.width = 960; fb.height = 544;
   sceDisplaySetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME);
 }

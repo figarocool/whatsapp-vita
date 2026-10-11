@@ -26,12 +26,12 @@ static const char *THEME_NAMES[6] = { "Predefinito", "Verde", "Blu", "Viola", "M
 
 // ---------- query al bridge ----------
 static void query(const char *tag, const char *path) {
-  Job *j = job_new(J_QUERY, NULL); if (!j) { toast_set("Occupato, riprova"); return; }
+  Job *j = job_new(J_QUERY, NULL); if (!j) { toast_set(T("Occupato, riprova")); return; }
   snprintf(j->id, sizeof j->id, "%s", tag); snprintf(j->path, sizeof j->path, "%s", path); job_commit();
   snprintf(qwant, sizeof qwant, "%s", tag); qwait = 1; q_frame = frame_no;
 }
 static void fire(const char *path, const char *body, const char *ok) {
-  Job *j = job_new(J_QUERY, NULL); if (!j) { toast_set("Occupato, riprova"); return; }
+  Job *j = job_new(J_QUERY, NULL); if (!j) { toast_set(T("Occupato, riprova")); return; }
   snprintf(j->path, sizeof j->path, "%s", path); snprintf(j->text, sizeof j->text, "%s", body); snprintf(j->extra, sizeof j->extra, "%s", ok); job_commit();
 }
 static void query_jid(const char *tag, const char *prefix, const char *jid, const char *suffix) { char e[400], p[600]; url_enc(jid, e, sizeof e); snprintf(p, sizeof p, "%s%s%s", prefix, e, suffix); query(tag, p); }
@@ -40,7 +40,7 @@ static jv *qarr(const char *tag) { return (qres && !strcmp(qtag, tag) && qres->t
 static jv *qobj(const char *tag) { return (qres && !strcmp(qtag, tag) && qres->t == J_OBJ) ? qres : NULL; }
 
 static int chat_index(const char *jid) { for (int i = 0; i < nchats; i++) if (!strcmp(chats[i].jid, jid)) return i; return -1; }
-static void open_by_jid(const char *jid) { int i = chat_index(jid); if (i >= 0) open_chat(i); else toast_set("Chat non trovata"); }
+static void open_by_jid(const char *jid) { int i = chat_index(jid); if (i >= 0) open_chat(i); else toast_set(T("Chat non trovata")); }
 
 // ---------- helper grafici ----------
 static void misc_clamp(float total, float viewh) { float mx = total > viewh ? total - viewh : 0; if (misc_scroll < 0) { misc_scroll = 0; misc_vel = 0; } if (misc_scroll > mx) { misc_scroll = mx; misc_vel = 0; } }
@@ -78,7 +78,7 @@ static void goto_tab(int i) {
 static void draw_tabs(void) {
   CHROME_BEGIN();
   int y = SH - TABH; vita2d_draw_rectangle(0, y, SW, TABH, C_BAR);
-  const char *lab[4] = { "Chat", "Aggiornamenti", "Community", "Chiamate" };
+  const char *lab[4] = { T("Chat"), T("Aggiornamenti"), T("Community"), T("Chiamate") };
   int cur = screen == S_LIST ? 0 : screen == S_UPDATES ? 1 : screen == S_COMM ? 2 : 3;
   int unread = 0, ch_unread = 0;   // il numero su 'Chat' conta solo le chat vere (come la lista); i canali stanno in Aggiornamenti e hanno il loro numero
   for (int i = 0; i < nchats; i++) if (chats[i].unread > 0 && !chats[i].archived) { if (chats[i].channel) ch_unread++; else unread++; }
@@ -123,7 +123,7 @@ enum { U_LABEL, U_MY, U_CONTACT, U_CHANNEL, U_FOLLOW };
 typedef struct { int type, idx; } URow;
 static URow urows[900]; static int nur;
 static void draw_updates(void) {
-  { CHROME_BEGIN(); textb(20, 14, C_GREEN2, 30, "Aggiornamenti"); CHROME_END(); }
+  { CHROME_BEGIN(); textb(20, 14, C_GREEN2, 30, T("Aggiornamenti")); CHROME_END(); }
   jv *a = qarr("updates"); jv *my = qres2_arr("mystatus"); int na = a ? a->count : 0;
   nur = 0; urows[nur++] = (URow){ U_LABEL, 0 }; urows[nur++] = (URow){ U_MY, 0 };
   int ns = 0; for (int i = 0; i < na && nur < 880; i++) if (!contact_seen(a->items[i])) { if (!ns++) urows[nur++] = (URow){ U_LABEL, 1 }; urows[nur++] = (URow){ U_CONTACT, i }; }
@@ -139,13 +139,13 @@ static void draw_updates(void) {
     int h = urows[r].type == U_LABEL ? 34 : ROWH;
     if (y + h >= top && y <= SH) {
       URow *u = &urows[r];
-      if (u->type == U_LABEL) { const char *lb[4] = { "Stato", "Recenti", "Visti", "Canali" }; label_row(y, lb[u->idx]); }
+      if (u->type == U_LABEL) { const char *lb[4] = { T("Stato"), T("Recenti"), T("Visti"), T("Canali") }; label_row(y, lb[u->idx]); }
       else if (u->type == U_MY) {
         int cnt = my ? my->count : 0; int views = 0; long lastts = 0; for (int i = 0; i < cnt; i++) { views += (int)json_num(my->items[i], "views", 0); lastts = (long)json_num(my->items[i], "ts", 0); }
-        char sub[120], tm[16] = ""; if (cnt) { fmt_ago(lastts, tm, sizeof tm); snprintf(sub, sizeof sub, "%d aggiorname%s - %s - visualizzazioni: %d", cnt, cnt == 1 ? "nto" : "nti", tm, views); } else snprintf(sub, sizeof sub, "Tocca + per aggiungere un aggiornamento");
+        char sub[120], tm[16] = ""; if (cnt) { fmt_ago(lastts, tm, sizeof tm); snprintf(sub, sizeof sub, "%d aggiorname%s - %s - visualizzazioni: %d", cnt, cnt == 1 ? "nto" : "nti", tm, views); } else snprintf(sub, sizeof sub, T("Tocca + per aggiungere un aggiornamento"));
         if (cnt) { vita2d_draw_fill_circle(44, y + ROWH / 2, 30, C_GREEN2); vita2d_draw_fill_circle(44, y + ROWH / 2, 28, C_BG); }
         draw_avatar(prof.jid[0] ? prof.jid : "me", prof.name, 44, y + ROWH / 2, cnt ? 25 : 26);
-        char nm[100]; snprintf(nm, sizeof nm, "La mia storia"); text(88, (int)y + 12, C_TEXT, 20, nm); char sb[200]; fit(sub, SW - 88 - 100, 15, sb, sizeof sb); text(88, (int)y + 42, C_SUB, 15, sb);
+        char nm[100]; snprintf(nm, sizeof nm, T("La mia storia")); text(88, (int)y + 12, C_TEXT, 20, nm); char sb[200]; fit(sub, SW - 88 - 100, 15, sb, sizeof sb); text(88, (int)y + 42, C_SUB, 15, sb);
         btn(0, (int)y, SW, ROWH, B_UPD_MY, 0);
         vita2d_draw_fill_circle(SW - 44, y + ROWH / 2, 24, C_GREEN); vita2d_draw_rectangle(SW - 56, y + ROWH / 2 - 2, 24, 4, C_WHITE); vita2d_draw_rectangle(SW - 46, y + ROWH / 2 - 12, 4, 24, C_WHITE);
         btn(SW - 80, (int)y, 80, ROWH, B_STORY_NEW, 0);
@@ -160,22 +160,22 @@ static void draw_updates(void) {
       } else if (u->type == U_CHANNEL) {
         Chat *c = &chats[u->idx]; draw_avatar(c->jid, c->name, 44, y + ROWH / 2, 26);
         char n2[200]; fit(c->name, SW - 88 - 90, 20, n2, sizeof n2); text(88, (int)y + 10, C_TEXT, 20, n2);
-        char ls[300]; fit(c->last[0] ? c->last : "Canale", SW - 88 - 70, 16, ls, sizeof ls); text(88, (int)y + 38, C_SUB, 16, ls);
+        char ls[300]; fit(c->last[0] ? c->last : T("Canale"), SW - 88 - 70, 16, ls, sizeof ls); text(88, (int)y + 38, C_SUB, 16, ls);
         char tm[16] = ""; if (c->ts) fmt_time(c->ts, tm, sizeof tm, 1); text(SW - 16 - tw(13, tm), (int)y + 14, c->unread > 0 ? C_GREEN2 : C_SUB, 13, tm);
         btn(0, (int)y, SW, ROWH, B_ROW, u->idx);
-      } else { icon_circle(44, y + ROWH / 2, C_GREEN); text(35, (int)y + ROWH / 2 - 18, C_WHITE, 34, "+"); text(88, (int)y + 26, C_TEXT, 19, "Segui un canale (incolla il link)"); btn(0, (int)y, SW, ROWH, B_FOLLOW_CH, 0); }
+      } else { icon_circle(44, y + ROWH / 2, C_GREEN); text(35, (int)y + ROWH / 2 - 18, C_WHITE, 34, "+"); text(88, (int)y + 26, C_TEXT, 19, T("Segui un canale (incolla il link)")); btn(0, (int)y, SW, ROWH, B_FOLLOW_CH, 0); }
     }
     y += h;
   }
   vita2d_disable_clipping(); clip_y0 = 0; clip_y1 = SH;
-  if (!a && qwait) text(88, 90, C_SUB, 14, "Caricamento...");
+  if (!a && qwait) text(88, 90, C_SUB, 14, T("Caricamento..."));
   draw_tabs();
   if (!qwait && frame_no - q_frame > 900) query("updates", "/updates");
   if (frame_no - my_q_frame > 900) { my_q_frame = frame_no; query2("mystatus", "/mystatus"); }
 }
 static void draw_statusview(void) {
   jv *its = NULL, *o = NULL; const char *nm = "", *jd = "";
-  if (st_mine) { its = qres2_arr("mystatus"); nm = "La mia storia"; jd = prof.jid; }
+  if (st_mine) { its = qres2_arr("mystatus"); nm = T("La mia storia"); jd = prof.jid; }
   else { jv *a = qarr("updates"); o = a && st_idx < a->count ? a->items[st_idx] : NULL; its = o ? json_get(o, "items") : NULL; nm = o ? json_str(o, "name", "") : ""; jd = o ? json_str(o, "jid", "") : ""; }
   if (!its || its->count == 0) { screen = S_UPDATES; return; }
   if (st_item >= its->count) st_item = its->count - 1; if (st_item < 0) st_item = 0;
@@ -186,7 +186,7 @@ static void draw_statusview(void) {
   if (img) {
     Media *md = media_get("status@broadcast", id);
     if (md && md->tex) { float w0 = vita2d_texture_get_width(md->tex), h0 = vita2d_texture_get_height(md->tex); float s = fminf((SW - 40) / w0, (SH - 170) / h0); vita2d_draw_texture_scale(md->tex, (SW - w0 * s) / 2, 80 + (SH - 170 - h0 * s) / 2, s, s); }
-    else text(SW / 2 - 40, SH / 2 - 10, C_SUB, 20, md && md->state == 2 ? "Errore" : "...");
+    else text(SW / 2 - 40, SH / 2 - 10, C_SUB, 20, md && md->state == 2 ? T("Errore") : "...");
     if (txt[0]) { vita2d_draw_rectangle(0, SH - 90, SW, 90, RGBA8(0, 0, 0, 150)); wrap_text(txt, 40, SH - 78, SW - 80, 20, C_WHITE, 26, 1); }
   } else wrap_text(txt, 80, 150, SW - 160, 32, C_WHITE, 42, 1);
   int n = its->count, seg = (SW - 40 - (n - 1) * 4) / n;
@@ -195,14 +195,14 @@ static void draw_statusview(void) {
   char tm[16]; fmt_ago((long)json_num(it, "ts", 0), tm, sizeof tm); text(74, 50, RGBA8(255, 255, 255, 200), 13, tm);
   btn(0, 0, SW / 3, SH, B_ST_PREV, 0); btn(SW / 3, 0, SW - SW / 3, SH, B_ST_NEXT, 0);
   if (st_mine) {
-    char v[60]; snprintf(v, sizeof v, "Visto da %d", (int)json_num(it, "views", 0)); int w = tw(18, v) + 50;
+    char v[60]; snprintf(v, sizeof v, T("Visto da %d"), (int)json_num(it, "views", 0)); int w = tw(18, v) + 50;
     rrect((SW - w) / 2, SH - 62, w, 44, 22, RGBA8(32, 32, 32, 255)); text((SW - w) / 2 + 25, SH - 51, C_WHITE, 18, v); btn((SW - w) / 2, SH - 62, w, 44, B_ST_VIEWERS, 0);
   }
 }
 
 // ---------- community ----------
 static void draw_comm(void) {
-  { CHROME_BEGIN(); textb(20, 14, C_GREEN2, 30, "Community"); rrect(SW - 190, 14, 170, 40, 20, C_GREEN2); text(SW - 190 + (170 - tw(17, "Nuova")) / 2, 24, C_WHITE, 17, "Nuova"); btn(SW - 190, 14, 170, 40, B_COMM_NEW, 0); CHROME_END(); }
+  { CHROME_BEGIN(); textb(20, 14, C_GREEN2, 30, T("Community")); rrect(SW - 190, 14, 170, 40, 20, C_GREEN2); text(SW - 190 + (170 - tw(17, T("Nuova"))) / 2, 24, C_WHITE, 17, T("Nuova")); btn(SW - 190, 14, 170, 40, B_COMM_NEW, 0); CHROME_END(); }
   jv *a = qarr("comm"); float top = HDR + 6; int rows = 0;
   if (a) for (int i = 0; i < a->count; i++) { jv *g = json_get(a->items[i], "groups"); rows += 1 + (g ? g->count : 0); }
   misc_clamp(rows * 64, SH - top - TABH);
@@ -218,7 +218,7 @@ static void draw_comm(void) {
     }
   }
   vita2d_disable_clipping(); clip_y0 = 0; clip_y1 = SH;
-  if (!a || a->count == 0) { text(60, 200, C_SUB, 20, qwait ? "Caricamento..." : "Nessuna community"); text(60, 236, C_SUB, 14, "Qui compaiono le community a cui partecipi. Con Nuova ne crei una."); }
+  if (!a || a->count == 0) { text(60, 200, C_SUB, 20, qwait ? T("Caricamento...") : T("Nessuna community")); text(60, 236, C_SUB, 14, T("Qui compaiono le community a cui partecipi. Con Nuova ne crei una.")); }
   draw_tabs();
   if (comm_refresh_at && frame_no >= comm_refresh_at) { comm_refresh_at = 0; query("comm", "/communities"); }
   if (!qwait && frame_no - q_frame > 1800) query("comm", "/communities");
@@ -226,20 +226,20 @@ static void draw_comm(void) {
 
 // ---------- chiamate ----------
 static void draw_calls(void) {
-  { CHROME_BEGIN(); textb(20, 14, C_GREEN2, 30, "Chiamate"); CHROME_END(); }
-  text(20, HDR + 2, C_SUB, 14, "Dalla Vita non si fanno chiamate: qui vedi il registro di quelle registrate.");
+  { CHROME_BEGIN(); textb(20, 14, C_GREEN2, 30, T("Chiamate")); CHROME_END(); }
+  text(20, HDR + 2, C_SUB, 14, T("Dalla Vita non si fanno chiamate: qui vedi il registro di quelle registrate."));
   jv *a = qarr("calls"); float top = HDR + 30; int n = a ? a->count : 0;
   misc_clamp(n * ROWH, SH - top - TABH);
   vita2d_enable_clipping(); vita2d_set_clip_rectangle(0, top, SW, SH - TABH); clip_y0 = top; clip_y1 = SH - TABH;
   for (int i = 0; i < n; i++) {
     float y = top + i * ROWH - misc_scroll; if (y + ROWH < top || y > SH) continue;
     jv *o = a->items[i]; const char *s = json_str(o, "status", "");
-    const char *st = !strcmp(s, "timeout") ? "Persa" : !strcmp(s, "reject") ? "Rifiutata" : !strcmp(s, "accept") ? "Risposta" : !strcmp(s, "terminate") ? "Terminata" : "In arrivo";
-    char sub[96], tm[16]; int dur = (int)json_num(o, "dur", 0); char ds[16] = ""; if (dur > 0) snprintf(ds, sizeof ds, " (%d:%02d)", dur / 60, dur % 60); snprintf(sub, sizeof sub, "%s%s - %s%s", json_bool(o, "out", 0) ? "In uscita: " : "", json_bool(o, "video", 0) ? "Video" : "Voce", st, ds); fmt_ago((long)json_num(o, "ts", 0), tm, sizeof tm);
+    const char *st = !strcmp(s, "timeout") ? T("Persa") : !strcmp(s, "reject") ? T("Rifiutata") : !strcmp(s, "accept") ? T("Risposta") : !strcmp(s, "terminate") ? T("Terminata") : T("In arrivo");
+    char sub[96], tm[16]; int dur = (int)json_num(o, "dur", 0); char ds[16] = ""; if (dur > 0) snprintf(ds, sizeof ds, " (%d:%02d)", dur / 60, dur % 60); snprintf(sub, sizeof sub, "%s%s - %s%s", json_bool(o, "out", 0) ? T("In uscita: ") : "", json_bool(o, "video", 0) ? T("Video") : T("Voce"), st, ds); fmt_ago((long)json_num(o, "ts", 0), tm, sizeof tm);
     people_row(y, json_str(o, "jid", ""), json_str(o, "name", ""), json_str(o, "name", ""), sub, tm, 0);
   }
   vita2d_disable_clipping(); clip_y0 = 0; clip_y1 = SH;
-  if (n == 0) text(60, 220, C_SUB, 20, qwait ? "Caricamento..." : "Nessuna chiamata registrata");
+  if (n == 0) text(60, 220, C_SUB, 20, qwait ? T("Caricamento...") : T("Nessuna chiamata registrata"));
   draw_tabs();
   if (!qwait && frame_no - q_frame > 900) query("calls", "/calls");
 }
@@ -249,40 +249,40 @@ static void draw_search(void) {
   CHROME_BEGIN();
   vita2d_draw_rectangle(0, 0, SW, 60, C_BAR); back_arrow(); btn(0, 0, 70, 60, B_BACK, 0);
   rrect(76, 10, SW - 96, 40, 20, C_CHIP);
-  char q[200]; fit(search_q[0] ? search_q : (search_scope[0] ? "Cerca nella chat..." : "Cerca..."), SW - 150, 19, q, sizeof q); text(98, 19, search_q[0] ? C_TEXT : C_SUB, 19, q); btn(76, 0, SW - 96, 60, B_SEARCH_BOX, 0);
+  char q[200]; fit(search_q[0] ? search_q : (search_scope[0] ? T("Cerca nella chat...") : T("Cerca...")), SW - 150, 19, q, sizeof q); text(98, 19, search_q[0] ? C_TEXT : C_SUB, 19, q); btn(76, 0, SW - 96, 60, B_SEARCH_BOX, 0);
   CHROME_END();
   jv *o = qobj("search"); jv *cs = o ? json_get(o, "chats") : NULL, *ms = o ? json_get(o, "messages") : NULL;
   int nc = cs ? cs->count : 0, nm = ms ? ms->count : 0;
   float total = (nc ? 34 + nc * ROWH : 0) + (nm ? 34 + nm * ROWH : 0); misc_clamp(total, SH - HDR);
   vita2d_enable_clipping(); vita2d_set_clip_rectangle(0, HDR, SW, SH); clip_y0 = HDR;
   float y = HDR - misc_scroll;
-  if (nc) { label_row(y, "Chat"); y += 34; for (int i = 0; i < nc; i++, y += ROWH) if (y + ROWH >= HDR && y <= SH) { people_row(y, json_str(cs->items[i], "jid", ""), json_str(cs->items[i], "name", ""), json_str(cs->items[i], "name", ""), NULL, NULL, 0); btn(0, (int)y, SW, ROWH, B_SEARCH_ROW, i); } }
-  if (nm) { label_row(y, "Messaggi"); y += 34; for (int i = 0; i < nm; i++, y += ROWH) if (y + ROWH >= HDR && y <= SH) { jv *r = ms->items[i]; char tm[16]; fmt_ago((long)json_num(r, "ts", 0), tm, sizeof tm); people_row(y, json_str(r, "jid", ""), json_str(r, "chat", ""), json_str(r, "chat", ""), json_str(r, "text", ""), tm, 0); btn(0, (int)y, SW, ROWH, B_SEARCH_ROW, 1000 + i); } }
+  if (nc) { label_row(y, T("Chat")); y += 34; for (int i = 0; i < nc; i++, y += ROWH) if (y + ROWH >= HDR && y <= SH) { people_row(y, json_str(cs->items[i], "jid", ""), json_str(cs->items[i], "name", ""), json_str(cs->items[i], "name", ""), NULL, NULL, 0); btn(0, (int)y, SW, ROWH, B_SEARCH_ROW, i); } }
+  if (nm) { label_row(y, T("Messaggi")); y += 34; for (int i = 0; i < nm; i++, y += ROWH) if (y + ROWH >= HDR && y <= SH) { jv *r = ms->items[i]; char tm[16]; fmt_ago((long)json_num(r, "ts", 0), tm, sizeof tm); people_row(y, json_str(r, "jid", ""), json_str(r, "chat", ""), json_str(r, "chat", ""), json_str(r, "text", ""), tm, 0); btn(0, (int)y, SW, ROWH, B_SEARCH_ROW, 1000 + i); } }
   vita2d_disable_clipping(); clip_y0 = 0;
-  if (!nc && !nm) text(60, 200, C_SUB, 20, qwait ? "Ricerca..." : (o ? "Nessun risultato" : "Tocca la barra per cercare"));
+  if (!nc && !nm) text(60, 200, C_SUB, 20, qwait ? T("Ricerca...") : (o ? T("Nessun risultato") : T("Tocca la barra per cercare")));
 }
 
 // ---------- nuova chat / nuovo gruppo ----------
 static int cmp_chat_name(const void *a, const void *b) { return strcasecmp(chats[*(const int *)a].name, chats[*(const int *)b].name); }
 static void build_contacts(void) { if (chat_limit < 400) chat_limit = 400; ncn = 0; for (int i = 0; i < nchats && ncn < 400; i++) if (!chats[i].group && !chats[i].channel) ncidx[ncn++] = i; qsort(ncidx, ncn, sizeof(int), cmp_chat_name); }
 static void draw_newchat(void) {
-  top_bar("Nuova chat");
+  top_bar(T("Nuova chat"));
   float total = 2 * ROWH + 34 + ncn * ROWH; misc_clamp(total, SH - HDR);
   vita2d_enable_clipping(); vita2d_set_clip_rectangle(0, HDR, SW, SH); clip_y0 = HDR;
   float y = HDR - misc_scroll;
   icon_circle(44, y + ROWH / 2, C_GREEN); vita2d_draw_fill_circle(36, y + ROWH / 2 - 4, 6, C_WHITE); vita2d_draw_fill_circle(52, y + ROWH / 2 - 4, 6, C_WHITE); rrect(28, y + ROWH / 2 + 4, 32, 9, 4, C_WHITE);
-  text(88, (int)y + 26, C_TEXT, 20, "Nuovo gruppo"); btn(0, (int)y, SW, ROWH, B_NC_GROUP, 0); y += ROWH;
+  text(88, (int)y + 26, C_TEXT, 20, T("Nuovo gruppo")); btn(0, (int)y, SW, ROWH, B_NC_GROUP, 0); y += ROWH;
   icon_circle(44, y + ROWH / 2, C_GREEN); text(35, (int)y + ROWH / 2 - 18, C_WHITE, 34, "+");
-  text(88, (int)y + 26, C_TEXT, 20, "Nuovo contatto (inserisci numero)"); btn(0, (int)y, SW, ROWH, B_NC_CONTACT, 0); y += ROWH;
-  label_row(y, "Contatti su WhatsApp"); y += 34;
+  text(88, (int)y + 26, C_TEXT, 20, T("Nuovo contatto (inserisci numero)")); btn(0, (int)y, SW, ROWH, B_NC_CONTACT, 0); y += ROWH;
+  label_row(y, T("Contatti su WhatsApp")); y += 34;
   for (int i = 0; i < ncn; i++, y += ROWH) if (y + ROWH >= HDR && y <= SH) { Chat *c = &chats[ncidx[i]]; people_row(y, c->jid, c->name, c->name, NULL, NULL, 0); btn(0, (int)y, SW, ROWH, B_NC_ROW, ncidx[i]); }
   vita2d_disable_clipping(); clip_y0 = 0;
 }
 static int gsel_has(const char *jid) { for (int i = 0; i < ngsel; i++) if (!strcmp(gsel[i], jid)) return i; return -1; }
 static void draw_group(void) {
-  top_bar("Nuovo gruppo");
-  rrect(20, HDR + 10, SW - 40, 48, 12, C_BAR); char s[200]; fit(gsubject[0] ? gsubject : "Nome del gruppo (tocca per scrivere)", SW - 90, 19, s, sizeof s); text(40, HDR + 22, gsubject[0] ? C_TEXT : C_SUB, 19, s); btn(20, HDR + 10, SW - 40, 48, B_GR_SUBJECT, 0);
-  char cnt[60]; snprintf(cnt, sizeof cnt, "Partecipanti: %d (max 40)", ngsel); text(24, HDR + 68, C_SUB, 15, cnt);
+  top_bar(T("Nuovo gruppo"));
+  rrect(20, HDR + 10, SW - 40, 48, 12, C_BAR); char s[200]; fit(gsubject[0] ? gsubject : T("Nome del gruppo (tocca per scrivere)"), SW - 90, 19, s, sizeof s); text(40, HDR + 22, gsubject[0] ? C_TEXT : C_SUB, 19, s); btn(20, HDR + 10, SW - 40, 48, B_GR_SUBJECT, 0);
+  char cnt[60]; snprintf(cnt, sizeof cnt, T("Partecipanti: %d (max 40)"), ngsel); text(24, HDR + 68, C_SUB, 15, cnt);
   float top = HDR + 94; misc_clamp(ncn * ROWH, SH - top);
   vita2d_enable_clipping(); vita2d_set_clip_rectangle(0, top, SW, SH); clip_y0 = top;
   for (int i = 0; i < ncn; i++) {
@@ -299,7 +299,7 @@ static void draw_group(void) {
 
 // ---------- info contatto / gruppo ----------
 static void draw_contact(void) {
-  top_bar("Info");
+  top_bar(T("Info"));
   jv *o = qobj("contact"); int group = o && json_bool(o, "group", 0);
   jv *ps = o ? json_get(o, "participants") : NULL; int np = ps ? ps->count : 0;
   float total = 300 + (group ? 80 + np * 48 : 90); misc_clamp(total, SH - HDR);
@@ -310,19 +310,19 @@ static void draw_contact(void) {
   if (o) {
     const char *ph = json_str(o, "phone", ""); if (ph[0]) text((SW - tw(18, ph)) / 2, (int)y + 212, C_SUB, 18, ph);
     const char *ab = group ? json_str(o, "desc", "") : json_str(o, "about", ""); y += 250;
-    if (ab[0]) { text(30, (int)y, C_GREEN2, 14, group ? "Descrizione" : "Info"); wrap_text(ab, 30, (int)y + 22, SW - 60, 18, C_TEXT, 24, 0); }
+    if (ab[0]) { text(30, (int)y, C_GREEN2, 14, group ? T("Descrizione") : T("Info")); wrap_text(ab, 30, (int)y + 22, SW - 60, 18, C_TEXT, 24, 0); }
     y += 80;
-    if (group) { char hd[60]; snprintf(hd, sizeof hd, "%d partecipanti", np); text(30, (int)y, C_GREEN2, 14, hd); y += 28; for (int i = 0; i < np; i++, y += 48) if (y + 48 >= HDR && y <= SH) { char pn[200]; fit(json_str(ps->items[i], "name", ""), 600, 18, pn, sizeof pn); text(40, (int)y + 10, C_TEXT, 18, pn); if (json_bool(ps->items[i], "admin", 0)) text(SW - 150, (int)y + 12, C_GREEN2, 14, "Amministratore"); } }
-    else { int bl = json_bool(o, "blocked", 0); text(30, (int)y + 10, C_RED, 20, bl ? "Sblocca contatto" : "Blocca contatto"); btn(0, (int)y, SW, 48, B_CT_BLOCK, bl); }
-  } else text(SW / 2 - 50, (int)y + 250, C_SUB, 18, qwait ? "Caricamento..." : "Dati non disponibili");
+    if (group) { char hd[60]; snprintf(hd, sizeof hd, "%d partecipanti", np); text(30, (int)y, C_GREEN2, 14, hd); y += 28; for (int i = 0; i < np; i++, y += 48) if (y + 48 >= HDR && y <= SH) { char pn[200]; fit(json_str(ps->items[i], "name", ""), 600, 18, pn, sizeof pn); text(40, (int)y + 10, C_TEXT, 18, pn); if (json_bool(ps->items[i], "admin", 0)) text(SW - 150, (int)y + 12, C_GREEN2, 14, T("Amministratore")); } }
+    else { int bl = json_bool(o, "blocked", 0); text(30, (int)y + 10, C_RED, 20, bl ? T("Sblocca contatto") : T("Blocca contatto")); btn(0, (int)y, SW, 48, B_CT_BLOCK, bl); }
+  } else text(SW / 2 - 50, (int)y + 250, C_SUB, 18, qwait ? T("Caricamento...") : T("Dati non disponibili"));
   vita2d_disable_clipping(); clip_y0 = 0;
 }
 
 // ---------- media, documenti, link ----------
 static void media_query(void) { const char *k = media_tab == 0 ? "media" : media_tab == 1 ? "docs" : "links"; char s[40]; snprintf(s, sizeof s, "&kind=%s", k); char e[400], p[600]; url_enc(media_jid, e, sizeof e); snprintf(p, sizeof p, "/list/%s?%s", e, s + 1); query("list", p); }
 static void draw_media(void) {
-  top_bar("Media, link e documenti");
-  const char *tabs[3] = { "Media", "Documenti", "Link" }; int cx = 16;
+  top_bar(T("Media, link e documenti"));
+  const char *tabs[3] = { T("Media"), T("Documenti"), T("Link") }; int cx = 16;
   for (int i = 0; i < 3; i++) { int w = tw(16, tabs[i]) + 28; rrect(cx, HDR + 6, w, 34, 17, media_tab == i ? C_CHIPSEL : C_CHIP); text(cx + 14, HDR + 12, media_tab == i ? C_GREEN2 : C_SUB, 16, tabs[i]); btn(cx, HDR, w, 46, B_MEDIA_TAB, i); cx += w + 8; }
   jv *a = qarr("list"); int n = a ? a->count : 0; float top = HDR + 52;
   int cols = UK >= 1.8f ? 3 : UK >= 1.3f ? 4 : 5; int cell = (SW - 24) / cols; int thsz = cell - 8; float total = media_tab == 0 ? ((n + cols - 1) / cols) * cell : n * 64.0f; misc_clamp(total, SH - top);
@@ -344,7 +344,7 @@ static void draw_media(void) {
     }
   }
   vita2d_disable_clipping(); clip_y0 = 0;
-  if (n == 0) text(60, 220, C_SUB, 20, qwait ? "Caricamento..." : (media_tab == 0 ? "Nessun media" : media_tab == 1 ? "Nessun documento" : "Nessun link"));
+  if (n == 0) text(60, 220, C_SUB, 20, qwait ? T("Caricamento...") : (media_tab == 0 ? T("Nessun media") : media_tab == 1 ? T("Nessun documento") : T("Nessun link")));
 }
 
 // ---------- visualizzatore immagine (chat e media) ----------
@@ -365,12 +365,12 @@ static void draw_viewer(void) {
     if (h > SH) { float hi = h / 2 - ccy, lo = SH - ccy - h / 2; if (vpy > hi) vpy = hi; if (vpy < lo) vpy = lo; } else vpy = 0;
     if (vz <= 1.01f) { vpx = 0; vpy = 0; }
     vita2d_draw_texture_scale(vt, ccx + vpx - w / 2, ccy + vpy - h / 2, s / 1.0f, s / 1.0f);
-    if (md && !md->big && (md->bstate == 4 || md->bstate == 3)) text(SW / 2 - 70, 36 + (SH - 140) / 2.0f - 10, RGBA8(210, 210, 210, 255), 16, "Carico la foto...");
+    if (md && !md->big && (md->bstate == 4 || md->bstate == 3)) text(SW / 2 - 70, 36 + (SH - 140) / 2.0f - 10, RGBA8(210, 210, 210, 255), 16, T("Carico la foto..."));
   }
   btn(0, 0, SW, SH, B_VIEW_CLOSE, 0);
-  { const char *lab[3] = { view_is_video ? "Salva video" : "Salva foto", "Rispondi", "Reagisci" }; int ids[3] = { B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT }; int gap = 10, bw = (SW - 4 * gap) / 3; if (bw > 210) bw = 210; int x0 = (SW - 3 * bw - 2 * gap) / 2;
+  { const char *lab[3] = { view_is_video ? T("Salva video") : T("Salva foto"), T("Rispondi"), T("Reagisci") }; int ids[3] = { B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT }; int gap = 10, bw = (SW - 4 * gap) / 3; if (bw > 210) bw = 210; int x0 = (SW - 3 * bw - 2 * gap) / 2;
     for (int i = 0; i < 3; i++) { int bx = x0 + i * (bw + gap); rrect(bx, SH - 60, bw, 44, 22, RGBA8(40, 40, 40, 255)); text(bx + (bw - tw(18, lab[i])) / 2, SH - 49, C_WHITE, 18, lab[i]); btn(bx, SH - 60, bw, 44, ids[i], 0); } }
-  text(SW / 2 - 130, 14, RGBA8(200, 200, 200, 255), 15, "Tocca fuori dai pulsanti o premi Cerchio per chiudere");
+  text(SW / 2 - 130, 14, RGBA8(200, 200, 200, 255), 15, T("Tocca fuori dai pulsanti o premi Cerchio per chiudere"));
 }
 
 enum { A_CLOSE = 1, A_NEW_GROUP, A_VIEW_CONTACT, A_SEARCH, A_MEDIA, A_MUTE_MENU, A_MUTE_8H, A_MUTE_1W, A_MUTE_ALWAYS, A_UNMUTE, A_DIS_MENU, A_DIS_OFF, A_DIS_24H, A_DIS_7D, A_DIS_90D, A_THEME_MENU, A_MORE, A_BLOCK, A_UNBLOCK, A_CLEAR, A_DELETE, A_EXPORT, A_ARCHIVE, A_DO_BLOCK, A_DO_CLEAR, A_DO_DELETE, A_LIST_ARCHIVED, A_LIST_PROFILE, A_LOGOUT, A_DO_LOGOUT, A_QUIT, A_INSTALL_PROBES, A_TOGGLE_SCALE, A_ABOUT_CUSTOM, A_REACT_VIEW, A_TOGGLE_UI, A_STORY_TEXT, A_STORY_PHOTO, A_TOGGLE_RECEIPTS, A_UNFOLLOW, A_DO_UNFOLLOW, A_INSTALL_PLUGIN, A_DECLINE_PLUGIN, A_REBOOT, A_TOGGLE_NOTIF, A_UNINSTALL_PLUGIN, A_DO_UNINSTALL, A_COMM_GROUP, A_COMM_RENAME, A_COMM_DESC, A_COMM_LEAVE, A_DO_COMM_LEAVE, A_UPD_NOW, A_UPD_LATER, A_UPD_ERR, A_UPD_RETRY, A_THEME_BASE = 100, A_STORY_COL_BASE = 200, A_ABOUT_BASE = 300, A_REACT_BASE = 400 };
@@ -424,20 +424,20 @@ static int cfg_add_line(const char *line) {
 }
 static int install_plugin(void) {
 #ifdef SAFE_BUILD
-  toast_set("Serve la versione completa (WhatsApp notifiche)"); return 0;
+  toast_set(T("Serve la versione completa (WhatsApp notifiche)")); return 0;
 #endif
   size_t pl; unsigned char *plug = read_file("app0:plugin/wa_notify.suprx", &pl);
-  if (!plug) { toast_set("Plugin non incluso nel VPK"); return 0; }
+  if (!plug) { toast_set(T("Plugin non incluso nel VPK")); return 0; }
   sceIoMkdir("ur0:tai", 0777);
-  if (write_file("ur0:tai/wa_notify.suprx", plug, pl)) { free(plug); toast_set("Impossibile scrivere: installa il VPK in modalita' unsafe"); return 0; }
+  if (write_file("ur0:tai/wa_notify.suprx", plug, pl)) { free(plug); toast_set(T("Impossibile scrivere: installa il VPK in modalita' unsafe")); return 0; }
   free(plug);
   if (!cfg_add_line(PLUGIN_LINE)) { toast_set("config.txt non scrivibile: modalita' unsafe necessaria"); return 0; }
-  toast_set("Plugin installato"); return 1;
+  toast_set(T("Plugin installato")); return 1;
 }
 // quattro plugin di prova a livelli: dopo il riavvio i loro file di registro dicono fin dove arriva il caricamento nella shell
 static int install_probes(void) {
 #ifdef SAFE_BUILD
-  toast_set("Serve la versione completa"); return 0;
+  toast_set(T("Serve la versione completa")); return 0;
 #endif
   sceIoMkdir("ur0:tai", 0777); int ok = 0;
   for (int n = 0; n < 4; n++) {
@@ -462,10 +462,10 @@ static int uninstall_one(const char *cp) {
 static int uninstall_plugin(void) {
   int a = uninstall_one("ux0:tai/config.txt"), b = uninstall_one("ur0:tai/config.txt");
   sceIoRemove("ur0:tai/wa_notify.suprx"); for (int n = 0; n < 4; n++) { char d[48]; snprintf(d, sizeof d, "ur0:tai/wa_probe%d.suprx", n); sceIoRemove(d); }
-  if (!a && !b) { toast_set("Riga del plugin non trovata nella configurazione"); return 0; }
-  toast_set("Plugin rimosso"); return 1;
+  if (!a && !b) { toast_set(T("Riga del plugin non trovata nella configurazione")); return 0; }
+  toast_set(T("Plugin rimosso")); return 1;
 }
-static void ask_reboot(void) { popup_begin("Riavviare la Vita ora?"); popup_add("Riavvia ora", A_REBOOT, 0); popup_add("Piu' tardi", A_CLOSE, 0); }
+static void ask_reboot(void) { popup_begin(T("Riavviare la Vita ora?")); popup_add(T("Riavvia ora"), A_REBOOT, 0); popup_add(T("Piu' tardi"), A_CLOSE, 0); }
 // il plugin installato e' diverso da quello incluso nel VPK? (aggiornamento automatico)
 static int plugin_differs(void) {
   size_t a, b; unsigned char *x = read_file("app0:plugin/wa_notify.suprx", &a); if (!x) return 0;
@@ -497,20 +497,20 @@ static void plugin_prompt_once(void) {
 #endif
   SceUID f = sceIoOpen("ux0:data/whatsapp/plugin_declined.txt", SCE_O_RDONLY, 0); if (f >= 0) { sceIoClose(f); return; }
   if (plugin_installed()) return;
-  popup_begin("Ricevere le notifiche?"); popup_add("Installa plugin (poi riavvia)", A_INSTALL_PLUGIN, 0); popup_add("Non ora", A_DECLINE_PLUGIN, 0);
+  popup_begin(T("Ricevere le notifiche?")); popup_add(T("Installa plugin (poi riavvia)"), A_INSTALL_PLUGIN, 0); popup_add(T("Non ora"), A_DECLINE_PLUGIN, 0);
 }
 static void popup_open_about(void) {
   static const char *ab[8] = { "Disponibile", "Occupato", "A scuola", "Al cinema", "Al lavoro", "In palestra", "In riunione", "Non posso parlare, solo WhatsApp" };
-  popup_begin("Info"); for (int i = 0; i < 8; i++) popup_add(ab[i], A_ABOUT_BASE + i, 0); popup_add("Scrivi tu...", A_ABOUT_CUSTOM, 0);
+  popup_begin(T("Info")); for (int i = 0; i < 8; i++) popup_add(T(ab[i]), A_ABOUT_BASE + i, 0); popup_add(T("Scrivi tu..."), A_ABOUT_CUSTOM, 0);
 }
 static void popup_chat_menu(void) {
   Chat *c = &chats[cur_chat]; popup_begin("");
-  if (c->channel) { popup_add("Smetti di seguire", A_UNFOLLOW, 1); return; }
-  popup_add("Nuovo gruppo", A_NEW_GROUP, 0); popup_add(c->group ? "Info gruppo" : "Visualizza contatto", A_VIEW_CONTACT, 0); popup_add("Cerca", A_SEARCH, 0);
-  popup_add("Media, link e documenti", A_MEDIA, 0); popup_add(c->muted ? "Riattiva notifiche" : "Silenzia notifiche", c->muted ? A_UNMUTE : A_MUTE_MENU, 0);
-  popup_add("Messaggi effimeri", A_DIS_MENU, 0); popup_add("Tema della chat", A_THEME_MENU, 0); popup_add("Altro", A_MORE, 0);
+  if (c->channel) { popup_add(T("Smetti di seguire"), A_UNFOLLOW, 1); return; }
+  popup_add(T("Nuovo gruppo"), A_NEW_GROUP, 0); popup_add(c->group ? T("Info gruppo") : T("Visualizza contatto"), A_VIEW_CONTACT, 0); popup_add(T("Cerca"), A_SEARCH, 0);
+  popup_add(T("Media, link e documenti"), A_MEDIA, 0); popup_add(c->muted ? T("Riattiva notifiche") : T("Silenzia notifiche"), c->muted ? A_UNMUTE : A_MUTE_MENU, 0);
+  popup_add(T("Messaggi effimeri"), A_DIS_MENU, 0); popup_add(T("Tema della chat"), A_THEME_MENU, 0); popup_add(T("Altro"), A_MORE, 0);
 }
-static void popup_confirm(const char *title, const char *yes, int act) { popup_begin(title); popup_add(yes, act, 1); popup_add("Annulla", A_CLOSE, 0); }
+static void popup_confirm(const char *title, const char *yes, int act) { popup_begin(title); popup_add(yes, act, 1); popup_add(T("Annulla"), A_CLOSE, 0); }
 static void popup_act(int act) {
   crumb("azione popup %d", act);
   Chat *c = (cur_chat >= 0 && cur_chat < nchats) ? &chats[cur_chat] : NULL;
@@ -521,65 +521,65 @@ static void popup_act(int act) {
     case A_VIEW_CONTACT: if (c) { snprintf(contact_jid, sizeof contact_jid, "%s", c->jid); contact_from = S_CHAT; screen = S_CONTACT; misc_scroll = 0; qres ? (json_free(qres), qres = NULL) : (void)0; query_jid("contact", "/contact/", c->jid, ""); } break;
     case A_SEARCH: if (c) { snprintf(search_scope, sizeof search_scope, "%s", c->jid); search_q[0] = 0; search_from = S_CHAT; screen = S_SEARCH; misc_scroll = 0; qtag[0] = 0; ime_next = IME_SEARCH; } break;
     case A_MEDIA: if (c) { snprintf(media_jid, sizeof media_jid, "%s", c->jid); media_tab = 0; misc_scroll = 0; screen = S_MEDIA; media_query(); } break;
-    case A_MUTE_MENU: popup_begin("Silenzia notifiche"); popup_add("8 ore", A_MUTE_8H, 0); popup_add("1 settimana", A_MUTE_1W, 0); popup_add("Sempre", A_MUTE_ALWAYS, 0); break;
+    case A_MUTE_MENU: popup_begin(T("Silenzia notifiche")); popup_add(T("8 ore"), A_MUTE_8H, 0); popup_add(T("1 settimana"), A_MUTE_1W, 0); popup_add(T("Sempre"), A_MUTE_ALWAYS, 0); break;
     case A_MUTE_8H: case A_MUTE_1W: case A_MUTE_ALWAYS: case A_UNMUTE:
-      if (c) { long long ms = act == A_MUTE_8H ? 28800000LL : act == A_MUTE_1W ? 604800000LL : act == A_MUTE_ALWAYS ? 3153600000000LL : 0; snprintf(more, sizeof more, ",\"action\":\"mute\",\"until\":%lld", ms); fire_jid("/chatmod", c->jid, more, act == A_UNMUTE ? "Notifiche riattivate" : "Chat silenziata"); c->muted = act != A_UNMUTE; } break;
-    case A_DIS_MENU: popup_begin("Messaggi effimeri"); popup_add("Disattivati", A_DIS_OFF, 0); popup_add("24 ore", A_DIS_24H, 0); popup_add("7 giorni", A_DIS_7D, 0); popup_add("90 giorni", A_DIS_90D, 0); break;
+      if (c) { long long ms = act == A_MUTE_8H ? 28800000LL : act == A_MUTE_1W ? 604800000LL : act == A_MUTE_ALWAYS ? 3153600000000LL : 0; snprintf(more, sizeof more, ",\"action\":\"mute\",\"until\":%lld", ms); fire_jid("/chatmod", c->jid, more, act == A_UNMUTE ? T("Notifiche riattivate") : T("Chat silenziata")); c->muted = act != A_UNMUTE; } break;
+    case A_DIS_MENU: popup_begin(T("Messaggi effimeri")); popup_add(T("Disattivati"), A_DIS_OFF, 0); popup_add(T("24 ore"), A_DIS_24H, 0); popup_add(T("7 giorni"), A_DIS_7D, 0); popup_add(T("90 giorni"), A_DIS_90D, 0); break;
     case A_DIS_OFF: case A_DIS_24H: case A_DIS_7D: case A_DIS_90D:
-      if (c) { int sec = act == A_DIS_24H ? 86400 : act == A_DIS_7D ? 604800 : act == A_DIS_90D ? 7776000 : 0; snprintf(more, sizeof more, ",\"seconds\":%d", sec); fire_jid("/disappear", c->jid, more, "Messaggi effimeri aggiornati"); } break;
-    case A_THEME_MENU: popup_begin("Tema della chat"); for (int i = 0; i < 6; i++) popup_add(THEME_NAMES[i], A_THEME_BASE + i, 0); break;
-    case A_MORE: if (c) { popup_begin(""); if (!c->group) popup_add(c->blocked ? "Sblocca" : "Blocca", c->blocked ? A_UNBLOCK : A_BLOCK, 1); popup_add("Svuota chat", A_CLEAR, 1); popup_add("Elimina chat", A_DELETE, 1); popup_add("Esporta chat", A_EXPORT, 0); popup_add(c->archived ? "Rimuovi dall'archivio" : "Archivia chat", A_ARCHIVE, 0); } break;
-    case A_BLOCK: popup_confirm("Bloccare questo contatto?", "Blocca", A_DO_BLOCK); break;
-    case A_CLEAR: popup_confirm("Svuotare la chat?", "Svuota chat", A_DO_CLEAR); break;
-    case A_DELETE: popup_confirm("Eliminare la chat?", "Elimina chat", A_DO_DELETE); break;
-    case A_DO_BLOCK: if (c) { fire_jid("/block", c->jid, ",\"block\":true", "Contatto bloccato"); c->blocked = 1; } break;
-    case A_UNBLOCK: if (c) { fire_jid("/block", c->jid, ",\"block\":false", "Contatto sbloccato"); c->blocked = 0; } break;
-    case A_DO_CLEAR: if (c) { fire_jid("/chatmod", c->jid, ",\"action\":\"clear\"", "Chat svuotata"); free_msgs(); c->last[0] = 0; } break;
-    case A_DO_DELETE: if (c) { fire_jid("/chatmod", c->jid, ",\"action\":\"delete\"", "Chat eliminata"); close_chat(); } break;
-    case A_ARCHIVE: if (c) { fire_jid("/chatmod", c->jid, c->archived ? ",\"action\":\"unarchive\"" : ",\"action\":\"archive\"", c->archived ? "Rimossa dall'archivio" : "Chat archiviata"); c->archived = !c->archived; close_chat(); } break;
-    case A_EXPORT: if (c) { Job *j = job_new(J_EXPORT, c->jid); if (j) { snprintf(j->text, sizeof j->text, "%s", c->name); job_commit(); toast_set("Esportazione..."); } } break;
+      if (c) { int sec = act == A_DIS_24H ? 86400 : act == A_DIS_7D ? 604800 : act == A_DIS_90D ? 7776000 : 0; snprintf(more, sizeof more, ",\"seconds\":%d", sec); fire_jid("/disappear", c->jid, more, T("Messaggi effimeri aggiornati")); } break;
+    case A_THEME_MENU: popup_begin(T("Tema della chat")); for (int i = 0; i < 6; i++) popup_add(T(THEME_NAMES[i]), A_THEME_BASE + i, 0); break;
+    case A_MORE: if (c) { popup_begin(""); if (!c->group) popup_add(c->blocked ? T("Sblocca") : T("Blocca"), c->blocked ? A_UNBLOCK : A_BLOCK, 1); popup_add(T("Svuota chat"), A_CLEAR, 1); popup_add(T("Elimina chat"), A_DELETE, 1); popup_add(T("Esporta chat"), A_EXPORT, 0); popup_add(c->archived ? T("Rimuovi dall'archivio") : T("Archivia chat"), A_ARCHIVE, 0); } break;
+    case A_BLOCK: popup_confirm(T("Bloccare questo contatto?"), T("Blocca"), A_DO_BLOCK); break;
+    case A_CLEAR: popup_confirm(T("Svuotare la chat?"), T("Svuota chat"), A_DO_CLEAR); break;
+    case A_DELETE: popup_confirm(T("Eliminare la chat?"), T("Elimina chat"), A_DO_DELETE); break;
+    case A_DO_BLOCK: if (c) { fire_jid("/block", c->jid, ",\"block\":true", T("Contatto bloccato")); c->blocked = 1; } break;
+    case A_UNBLOCK: if (c) { fire_jid("/block", c->jid, ",\"block\":false", T("Contatto sbloccato")); c->blocked = 0; } break;
+    case A_DO_CLEAR: if (c) { fire_jid("/chatmod", c->jid, ",\"action\":\"clear\"", T("Chat svuotata")); free_msgs(); c->last[0] = 0; } break;
+    case A_DO_DELETE: if (c) { fire_jid("/chatmod", c->jid, ",\"action\":\"delete\"", T("Chat eliminata")); close_chat(); } break;
+    case A_ARCHIVE: if (c) { fire_jid("/chatmod", c->jid, c->archived ? ",\"action\":\"unarchive\"" : ",\"action\":\"archive\"", c->archived ? T("Rimossa dall'archivio") : T("Chat archiviata")); c->archived = !c->archived; close_chat(); } break;
+    case A_EXPORT: if (c) { Job *j = job_new(J_EXPORT, c->jid); if (j) { snprintf(j->text, sizeof j->text, "%s", c->name); job_commit(); toast_set(T("Esportazione...")); } } break;
     case A_LIST_ARCHIVED: show_archived = !show_archived; list_scroll = 0; break;
     case A_LIST_PROFILE: screen = S_PROFILE; break;
     case A_QUIT: quit_req = 1; break;
     case A_INSTALL_PROBES: if (install_probes()) ask_reboot(); break;
-    case A_TOGGLE_SCALE: { ui_k = ui_k > 1.8f ? 1.0f : ui_k > 1.2f ? 2.0f : 1.5f; ui_gen++; SceUID sf = sceIoOpen("ux0:data/whatsapp/ui_scale.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (sf >= 0) { char d = ui_k < 1.2f ? '0' : ui_k < 1.8f ? '1' : '2'; sceIoWrite(sf, &d, 1); sceIoClose(sf); } toast_set(ui_k < 1.2f ? "Dimensione: normale" : ui_k < 1.8f ? "Dimensione: grande" : "Dimensione: molto grande"); break; }
-    case A_ABOUT_CUSTOM: ime_open(IME_ABOUT, "Info", prof.about); break;
-    case A_STORY_TEXT: ime_open(IME_STORYTEXT, "Testo della storia", ""); break;
+    case A_TOGGLE_SCALE: { ui_k = ui_k > 1.8f ? 1.0f : ui_k > 1.2f ? 2.0f : 1.5f; ui_gen++; SceUID sf = sceIoOpen("ux0:data/whatsapp/ui_scale.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (sf >= 0) { char d = ui_k < 1.2f ? '0' : ui_k < 1.8f ? '1' : '2'; sceIoWrite(sf, &d, 1); sceIoClose(sf); } toast_set(ui_k < 1.2f ? T("Dimensione: normale") : ui_k < 1.8f ? T("Dimensione: grande") : T("Dimensione: molto grande")); break; }
+    case A_ABOUT_CUSTOM: ime_open(IME_ABOUT, T("Info"), prof.about); break;
+    case A_STORY_TEXT: ime_open(IME_STORYTEXT, T("Testo della storia"), ""); break;
     case A_STORY_PHOTO: pick_mode = 2; screen = S_PICKER; pick_load(""); break;
-    case A_TOGGLE_RECEIPTS: { receipts_on = !receipts_on; if (receipts_on) sceIoRemove("ux0:data/whatsapp/receipts_off.txt"); else write_file("ux0:data/whatsapp/receipts_off.txt", "1", 1); toast_set(receipts_on ? "Conferma di visualizzazione: attiva" : "Conferma di visualizzazione: disattivata"); break; }
+    case A_TOGGLE_RECEIPTS: { receipts_on = !receipts_on; if (receipts_on) sceIoRemove("ux0:data/whatsapp/receipts_off.txt"); else write_file("ux0:data/whatsapp/receipts_off.txt", "1", 1); toast_set(receipts_on ? T("Conferma di visualizzazione: attiva") : T("Conferma di visualizzazione: disattivata")); break; }
     case A_UPD_NOW: upd_install(); break;
     case A_UPD_LATER: break;
     case A_UPD_ERR: upd_dismiss(); break;
     case A_UPD_RETRY: upd_retry(); break;
-    case A_COMM_GROUP: ime_open(IME_COMM_GNAME, "Nome del nuovo gruppo", ""); break;
-    case A_COMM_RENAME: ime_open(IME_COMM_RENAME, "Nuovo nome della community", ""); break;
-    case A_COMM_DESC: ime_open(IME_COMM_DESC2, "Descrizione della community", ""); break;
-    case A_COMM_LEAVE: popup_confirm("Uscire dalla community?", "Esci dalla community", A_DO_COMM_LEAVE); break;
-    case A_DO_COMM_LEAVE: { char b[260]; snprintf(b, sizeof b, "{\"id\":\"%s\"}", comm_sel); fire("/community/leave", b, "Sei uscito dalla community"); comm_refresh_at = frame_no + 240; break; }
-    case A_UNFOLLOW: popup_confirm("Smettere di seguire questo canale?", "Smetti di seguire", A_DO_UNFOLLOW); break;
-    case A_DO_UNFOLLOW: if (c) { fire_jid("/channel/unfollow", c->jid, "", "Non segui piu' il canale"); close_chat(); } break;
-    case A_TOGGLE_UI: { apply_ui_theme(!ui_dark); vita2d_set_clear_color(C_BG); SceUID tf = sceIoOpen("ux0:data/whatsapp/theme_ui.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (tf >= 0) { char d = ui_dark ? '1' : '0'; sceIoWrite(tf, &d, 1); sceIoClose(tf); } toast_set(ui_dark ? "Tema scuro" : "Tema chiaro"); break; }
+    case A_COMM_GROUP: ime_open(IME_COMM_GNAME, T("Nome del nuovo gruppo"), ""); break;
+    case A_COMM_RENAME: ime_open(IME_COMM_RENAME, T("Nuovo nome della community"), ""); break;
+    case A_COMM_DESC: ime_open(IME_COMM_DESC2, T("Descrizione della community"), ""); break;
+    case A_COMM_LEAVE: popup_confirm(T("Uscire dalla community?"), T("Esci dalla community"), A_DO_COMM_LEAVE); break;
+    case A_DO_COMM_LEAVE: { char b[260]; snprintf(b, sizeof b, "{\"id\":\"%s\"}", comm_sel); fire("/community/leave", b, T("Sei uscito dalla community")); comm_refresh_at = frame_no + 240; break; }
+    case A_UNFOLLOW: popup_confirm(T("Smettere di seguire questo canale?"), T("Smetti di seguire"), A_DO_UNFOLLOW); break;
+    case A_DO_UNFOLLOW: if (c) { fire_jid("/channel/unfollow", c->jid, "", T("Non segui piu' il canale")); close_chat(); } break;
+    case A_TOGGLE_UI: { apply_ui_theme(!ui_dark); vita2d_set_clear_color(C_BG); SceUID tf = sceIoOpen("ux0:data/whatsapp/theme_ui.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (tf >= 0) { char d = ui_dark ? '1' : '0'; sceIoWrite(tf, &d, 1); sceIoClose(tf); } toast_set(ui_dark ? T("Tema scuro") : T("Tema chiaro")); break; }
     case A_INSTALL_PLUGIN: if (install_plugin()) { plugin_cache = -1; ask_reboot(); } break;
     case A_REBOOT: scePowerRequestColdReset(); break;
-    case A_TOGGLE_NOTIF: if (notif_enabled()) { write_file(NOTIF_FLAG, "1", 1); toast_set("Notifiche disattivate"); } else { sceIoRemove(NOTIF_FLAG); toast_set("Notifiche attivate"); } break;
-    case A_UNINSTALL_PLUGIN: popup_confirm("Rimuovere il plugin notifiche?", "Rimuovi", A_DO_UNINSTALL); break;
+    case A_TOGGLE_NOTIF: if (notif_enabled()) { write_file(NOTIF_FLAG, "1", 1); toast_set(T("Notifiche disattivate")); } else { sceIoRemove(NOTIF_FLAG); toast_set(T("Notifiche attivate")); } break;
+    case A_UNINSTALL_PLUGIN: popup_confirm(T("Rimuovere il plugin notifiche?"), T("Rimuovi"), A_DO_UNINSTALL); break;
     case A_DO_UNINSTALL: if (uninstall_plugin()) { plugin_cache = -1; ask_reboot(); } break;
     case A_DECLINE_PLUGIN: write_file("ux0:data/whatsapp/plugin_declined.txt", "1", 1); break;
-    case A_LOGOUT: popup_confirm("Disconnettere WhatsApp da questa Vita?", "Disconnetti", A_DO_LOGOUT); break;
-    case A_DO_LOGOUT: fire("/logout", "{}", "Disconnesso"); nchats = 0; free_msgs(); screen = S_LOGIN; break;
+    case A_LOGOUT: popup_confirm(T("Disconnettere WhatsApp da questa Vita?"), T("Disconnetti"), A_DO_LOGOUT); break;
+    case A_DO_LOGOUT: fire("/logout", "{}", T("Disconnesso")); nchats = 0; free_msgs(); screen = S_LOGIN; break;
     default:
       if (act >= A_REACT_BASE && act < A_REACT_BASE + 6) {
         static const unsigned em[6] = { 0x1F44D, 0x2764, 0x1F602, 0x1F62E, 0x1F622, 0x1F64F }; char t[16] = ""; append_cp(t, sizeof t, em[act - A_REACT_BASE]);
-        Job *j = job_new(J_REACT, view_jid); if (j) { snprintf(j->id, sizeof j->id, "%s", view_key_id); snprintf(j->text, sizeof j->text, "%s", t); job_commit(); toast_set("Reazione inviata"); } break;
+        Job *j = job_new(J_REACT, view_jid); if (j) { snprintf(j->id, sizeof j->id, "%s", view_key_id); snprintf(j->text, sizeof j->text, "%s", t); job_commit(); toast_set(T("Reazione inviata")); } break;
       }
       if (act >= A_ABOUT_BASE && act < A_ABOUT_BASE + 8) {
         static const char *ab[8] = { "Disponibile", "Occupato", "A scuola", "Al cinema", "Al lavoro", "In palestra", "In riunione", "Non posso parlare, solo WhatsApp" };
-        const char *t = ab[act - A_ABOUT_BASE]; Job *j = job_new(J_PROFILE, NULL); if (j) { snprintf(j->kind, sizeof j->kind, "about"); snprintf(j->text, sizeof j->text, "%s", t); job_commit(); snprintf(prof.about, sizeof prof.about, "%s", t); } break;
+        const char *t = T(ab[act - A_ABOUT_BASE]); Job *j = job_new(J_PROFILE, NULL); if (j) { snprintf(j->kind, sizeof j->kind, "about"); snprintf(j->text, sizeof j->text, "%s", t); job_commit(); snprintf(prof.about, sizeof prof.about, "%s", t); } break;
       }
       if (act >= A_STORY_COL_BASE && act < A_STORY_COL_BASE + 6) {
         static const char *cols[6] = { "#128C7E", "#1F6FEB", "#7E3FF2", "#D93A4F", "#E8741D", "#4B5663" };
         char t[2100], body[2300]; jesc(story_text, t, sizeof t); snprintf(body, sizeof body, "{\"text\":\"%s\",\"bg\":\"%s\",\"font\":1}", t, cols[act - A_STORY_COL_BASE]);
-        fire("/status/post", body, "Storia pubblicata"); refresh_my_at = frame_no + 240; break;
+        fire("/status/post", body, T("Storia pubblicata")); refresh_my_at = frame_no + 240; break;
       }
       if (act >= A_THEME_BASE && act < A_THEME_BASE + 6) { theme_idx = act - A_THEME_BASE; SceUID f = sceIoOpen("ux0:data/whatsapp/theme.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (f >= 0) { char d = '0' + theme_idx; sceIoWrite(f, &d, 1); sceIoClose(f); } }
       break;
@@ -627,7 +627,7 @@ static int cam_save_jpeg(const char *path) {
 static void cam_shoot(void) {
   if (!cam_on) return;
   sceIoMkdir("ux0:data/whatsapp", 0777);
-  if (cam_save_jpeg("ux0:data/whatsapp/camera.jpg") != 0) { toast_set("Impossibile salvare la foto"); return; }
+  if (cam_save_jpeg("ux0:data/whatsapp/camera.jpg") != 0) { toast_set(T("Impossibile salvare la foto")); return; }
   cam_stop();
   snprintf(sel_path, sizeof sel_path, "ux0:data/whatsapp/camera.jpg"); snprintf(sel_kind, sizeof sel_kind, "image"); caption[0] = 0;
   if (prev_tex) { tex_retire(prev_tex); prev_tex = NULL; }
@@ -638,16 +638,16 @@ static void draw_camera(void) {
   vita2d_draw_rectangle(0, 0, SW, SH, RGBA8(0, 0, 0, 255));
   if (cam_on && sceCameraIsActive(cam_dev) > 0) {
     int r = sceCameraRead(cam_dev, &cam_read);
-    if (r < 0) { if (++cam_fail > 90) { int d = cam_dev; cam_stop(); crumb("fotocamera: nessun fotogramma, riapro"); if (cam_start(d) < 0) { toast_set("Fotocamera non disponibile"); screen = S_PICKER; return; } } } else cam_fail = 0;
+    if (r < 0) { if (++cam_fail > 90) { int d = cam_dev; cam_stop(); crumb("fotocamera: nessun fotogramma, riapro"); if (cam_start(d) < 0) { toast_set(T("Fotocamera non disponibile")); screen = S_PICKER; return; } } } else cam_fail = 0;
   }
   if (cam_tex) { float s = fminf(SW / (float)CAM_W, (SH - 150) / (float)CAM_H), w = CAM_W * s, h = CAM_H * s; vita2d_draw_texture_scale(cam_tex, (SW - w) / 2, 10 + (SH - 150 - h) / 2, s, s); }
-  if (!cam_on) text(SW / 2 - 90, SH / 2 - 20, RGBA8(210, 210, 210, 255), 20, "Fotocamera non attiva");
+  if (!cam_on) text(SW / 2 - 90, SH / 2 - 20, RGBA8(210, 210, 210, 255), 20, T("Fotocamera non attiva"));
   vita2d_draw_rectangle(0, SH - 130, SW, 130, RGBA8(0, 0, 0, 255));
   vita2d_draw_fill_circle(SW / 2, SH - 65, 44, RGBA8(255, 255, 255, 255)); vita2d_draw_fill_circle(SW / 2, SH - 65, 36, RGBA8(0x25, 0xD3, 0x66, 255)); btn(SW / 2 - 50, SH - 115, 100, 100, B_CAM_SHOT, 0);
-  const char *fl = cam_dev == 0 ? "Frontale" : "Posteriore";
+  const char *fl = cam_dev == 0 ? T("Frontale") : T("Posteriore");
   rrect(SW - 230, SH - 90, 200, 50, 25, RGBA8(50, 50, 50, 255)); text(SW - 230 + (200 - tw(18, fl)) / 2, SH - 77, C_WHITE, 18, fl); btn(SW - 230, SH - 90, 200, 50, B_CAM_FLIP, 0);
   vita2d_draw_rectangle(0, 0, SW, 0, 0); back_arrow(); btn(0, 0, 70, 60, B_BACK, 0);
-  text(SW / 2 - 150, SH - 120 - 1, RGBA8(170, 170, 170, 255), 13, "X = scatta   Triangolo = cambia fotocamera   Cerchio = esci");
+  text(SW / 2 - 150, SH - 120 - 1, RGBA8(170, 170, 170, 255), 13, T("X = scatta   Triangolo = cambia fotocamera   Cerchio = esci"));
 }
 
 
@@ -657,9 +657,9 @@ static void draw_update_overlay(void) {
   if (!upd_busy()) return;
   UpdInfo u; upd_snapshot(&u);
   vita2d_draw_rectangle(0, 0, SW, SH, C_BG); btn(0, 0, SW, SH, B_UPD_BLOCK, 0);
-  textb((SW - tw(30, "Aggiornamento")) / 2, 90, C_GREEN2, 30, "Aggiornamento");
+  textb((SW - tw(30, T("Aggiornamento"))) / 2, 90, C_GREEN2, 30, T("Aggiornamento"));
   char vt[120]; snprintf(vt, sizeof vt, "%s  ->  %s", u.current, u.tag); text((SW - tw(20, vt)) / 2, 142, C_TEXT, 20, vt);
-  const char *stage = u.state == UPD_DOWNLOADING ? "Scarico il nuovo pacchetto" : u.state == UPD_VERIFYING ? "Verifico il pacchetto" : u.state == UPD_EXTRACTING ? "Preparo l'installazione" : "Installo";
+  const char *stage = u.state == UPD_DOWNLOADING ? T("Scarico il nuovo pacchetto") : u.state == UPD_VERIFYING ? T("Verifico il pacchetto") : u.state == UPD_EXTRACTING ? T("Preparo l'installazione") : T("Installo");
   text((SW - tw(22, stage)) / 2, 200, C_TEXT, 22, stage);
   float frac = u.total > 0 ? (float)u.done / (float)u.total : 0; if (frac > 1) frac = 1;
   float bw = 640, bx = (SW - bw) / 2, by = 260;
@@ -668,12 +668,48 @@ static void draw_update_overlay(void) {
   else { float ph = (float)(frame_no % 90) / 90.0f; float fw = 160, fx = bx + (bw - fw) * (ph < 0.5f ? ph * 2 : 2 - ph * 2); rrect(fx, by, fw, 26, 13, C_GREEN2); }   // attesa senza percentuale: barra che scorre
   char pc[96];
   if (u.state == UPD_DOWNLOADING && u.total > 0) snprintf(pc, sizeof pc, "%d%%   -   %.1f / %.1f MB", (int)(frac * 100), u.done / 1048576.0, u.total / 1048576.0);
-  else if (u.state == UPD_DOWNLOADING) snprintf(pc, sizeof pc, "%.1f MB scaricati", u.done / 1048576.0);
+  else if (u.state == UPD_DOWNLOADING) snprintf(pc, sizeof pc, T("%.1f MB scaricati"), u.done / 1048576.0);
   else if (u.state == UPD_EXTRACTING && u.total > 0) snprintf(pc, sizeof pc, "%d%%   -   file %d di %d", (int)(frac * 100), (int)u.done, (int)u.total);
   else snprintf(pc, sizeof pc, "%s", u.msg);
   text((SW - tw(18, pc)) / 2, by + 44, C_SUB, 18, pc);
-  if (u.state == UPD_INSTALLING) text((SW - tw(16, "L'app si chiude e si riapre da sola: non spegnere la Vita")) / 2, 380, C_SUB, 16, "L'app si chiude e si riapre da sola: non spegnere la Vita");
-  if (u.state == UPD_DOWNLOADING) text((SW - tw(15, "L'aggiornamento e' obbligatorio: attendi il termine")) / 2, 440, C_SUB, 15, "L'aggiornamento e' obbligatorio: attendi il termine");
+  if (u.state == UPD_INSTALLING) text((SW - tw(16, T("L'app si chiude e si riapre da sola: non spegnere la Vita"))) / 2, 380, C_SUB, 16, T("L'app si chiude e si riapre da sola: non spegnere la Vita"));
+  if (u.state == UPD_DOWNLOADING) text((SW - tw(15, T("L'aggiornamento e' obbligatorio: attendi il termine"))) / 2, 440, C_SUB, 15, T("L'aggiornamento e' obbligatorio: attendi il termine"));
+}
+
+
+// ---------- scelta della lingua ----------
+static vita2d_font *lang_fonts[L_COUNT], *lang_roboto;   // il nome di ogni lingua si scrive col suo font, qualunque sia la lingua dell'interfaccia
+static vita2d_font *lang_font(int l) {
+  const char *p = i18n_font_path(l);
+  if (!p) { if (!lang_roboto) lang_roboto = vita2d_load_font_file(ROBOTO_PATH); return lang_roboto; }
+  if (!lang_fonts[l]) lang_fonts[l] = vita2d_load_font_file(p);
+  return lang_fonts[l] ? lang_fonts[l] : lang_font(L_EN);
+}
+static void lang_select(int i) {   // 0 = automatica, 1.. = lingue
+  i18n_set(i == 0 ? -1 : i - 1); ui_gen++; memset(wcache, 0, sizeof wcache); screen = S_PROFILE; misc_scroll = 0;
+  crumb("lingua scelta: %s (%d)", i == 0 ? "automatica" : "manuale", i18n_lang());
+}
+static void draw_lang(void) {
+  vita2d_draw_rectangle(0, 0, SW, 60, C_BAR); back_arrow(); btn(0, 0, 70, 60, B_BACK, 0); textb(70, 14, C_TEXT, 26, T("Scegli la lingua"));
+  const float top = 60, rowh = 60; const int n = L_COUNT + 1;
+  misc_clamp(n * rowh, SH - top);
+  vita2d_enable_clipping(); vita2d_set_clip_rectangle(0, top, SW, SH); clip_y0 = top; clip_y1 = SH;
+  int sys = i18n_system_lang();
+  for (int i = 0; i < n; i++) {
+    float y = top + i * rowh - misc_scroll; if (y + rowh < top || y > SH) continue;
+    int sel = i == 0 ? i18n_is_auto() : (!i18n_is_auto() && i18n_lang() == i - 1);
+    if (sel) rrect(10, y + 4, SW - 20, rowh - 8, 12, C_BAR);
+    if (i == 0) {
+      char nm[160]; snprintf(nm, sizeof nm, T("Automatica (%s)"), i18n_native_name(sys));
+      { int old_cjk = cjk_ok; cjk_ok = i18n_font_path(sys) != NULL; font_override = lang_font(sys); text(30, (int)y + 8, C_TEXT, 20, nm); font_override = NULL; cjk_ok = old_cjk; }
+      text(30, (int)y + 34, C_SUB, 14, T("Segue la lingua di sistema della Vita"));
+    } else {
+      { int old_cjk = cjk_ok; cjk_ok = i18n_font_path(i - 1) != NULL; font_override = lang_font(i - 1); text(30, (int)y + 16, C_TEXT, 22, i18n_native_name(i - 1)); font_override = NULL; cjk_ok = old_cjk; }
+    }
+    if (sel) vita2d_draw_fill_circle(SW - 50, y + rowh / 2, 12, C_GREEN2);
+    vita2d_draw_rectangle(30, y + rowh - 1, SW - 60, 1, C_DIV); btn(0, (int)y, SW, rowh, B_LANG_ROW, i);
+  }
+  vita2d_disable_clipping(); clip_y0 = 0; clip_y1 = SH;
 }
 
 // ---------- disegno schermate aggiuntive ----------
@@ -684,6 +720,7 @@ static void draw_extra_screens(void) {
     case S_COMM: draw_comm(); break;
     case S_CALLS: draw_calls(); break;
     case S_CAMERA: draw_camera(); break;
+    case S_LANG: draw_lang(); break;
     case S_SEARCH: draw_search(); break;
     case S_NEWCHAT: draw_newchat(); break;
     case S_GROUP: draw_group(); break;
@@ -700,6 +737,7 @@ static void draw_extra_screens(void) {
 static int extra_back(void) {
   switch (screen) {
     case S_CAMERA: cam_stop(); screen = S_PICKER; return 1;
+    case S_LANG: screen = S_PROFILE; misc_scroll = 0; return 1;
     case S_SEARCH: screen = search_from == S_CHAT && cur_chat >= 0 ? S_CHAT : S_LIST; misc_scroll = 0; return 1;
     case S_NEWCHAT: screen = S_LIST; return 1;
     case S_GROUP: screen = S_NEWCHAT; misc_scroll = 0; return 1;
@@ -714,14 +752,14 @@ static void handle_extra(int id, int arg) {
   switch (id) {
     case B_TAB: goto_tab(arg); break;
     case B_LOGOUT: popup_act(A_LOGOUT); break;
-    case B_BRIDGE_ADDR: ime_open(IME_BRIDGE, "Indirizzo bridge (es. http://192.168.1.59:8787)", base_url); break;
+    case B_BRIDGE_ADDR: ime_open(IME_BRIDGE, T("Indirizzo bridge (es. http://192.168.1.59:8787)"), base_url); break;
     case B_PLUGIN: popup_act(plugin_installed() ? A_TOGGLE_NOTIF : A_INSTALL_PLUGIN); plugin_cache = -1; break;
     case B_PLUGIN_RM: popup_act(A_UNINSTALL_PLUGIN); break;
     case B_PLUGIN_DIAG: {   // diagnostica: configurazione, segno di vita, esito dei plugin di prova, ultime righe del registro
-      popup_begin("Diagnostica plugin notifiche");
-      { const char *cp = tai_config_path(); char l[64]; snprintf(l, sizeof l, "Config: %s", cp ? cp : "NON TROVATA"); popup_add(l, A_CLOSE, 0); }
+      popup_begin(T("Diagnostica plugin notifiche"));
+      { const char *cp = tai_config_path(); char l[64]; snprintf(l, sizeof l, T("Config: %s"), cp ? cp : "NON TROVATA"); popup_add(l, A_CLOSE, 0); }
       int al = alive_state(); char l0[64];
-      snprintf(l0, sizeof l0, "Plugin: %s", al == 1 ? "attivo (il file di stato cambia)" : al < 0 ? "verifica in corso..." : "NON attivo (file di stato fermo)"); popup_add(l0, A_CLOSE, 0);
+      snprintf(l0, sizeof l0, T("Plugin: %s"), al == 1 ? T("attivo (il file di stato cambia)") : al < 0 ? T("verifica in corso...") : T("NON attivo (file di stato fermo)")); popup_add(l0, A_CLOSE, 0);
       for (int n = 0; n < 4; n++) {   // plugin di prova: se un livello non scrive nulla, il caricamento si ferma li'
         char f[64], l[64]; snprintf(f, sizeof f, "ux0:data/whatsapp/probe_s%d.log", n); size_t pl2; unsigned char *pb2 = read_file(f, &pl2);
         if (!pb2) snprintf(l, sizeof l, "Prova %d: assente (non partito)", n);
@@ -732,59 +770,61 @@ static void handle_extra(int id, int arg) {
       if (!pb) popup_add("plugin.log assente: plugin principale mai partito", A_CLOSE, 0);
       else { char *tail = (char *)pb + (pl > 400 ? pl - 400 : 0); char *lines[20]; int nl = 0; char *sv; for (char *tk = strtok_r(tail, "\n", &sv); tk && nl < 20; tk = strtok_r(NULL, "\n", &sv)) lines[nl++] = tk;
         for (int i = nl > 3 ? nl - 3 : 0; i < nl; i++) { char l[64]; snprintf(l, sizeof l, "%.58s", lines[i]); popup_add(l, A_CLOSE, 0); } free(pb); }
-      popup_add("Chiudi", A_CLOSE, 0); break; }
+      popup_add(T("Chiudi"), A_CLOSE, 0); break; }
     case B_NOTIF_TEST: {
       write_file("ur0:tai/wa_notif_test.txt", "1", 1);
 #ifndef SAFE_BUILD
       { static SceWChar16 w[0x410 / 2]; memset(w, 0, sizeof w); const char *t = "Prova dall'app"; for (int i = 0; t[i] && i < 200; i++) w[i] = (unsigned char)t[i];   // prova diretta dall'app (processo normale)
         int r0 = sceSysmoduleLoadModule(SCE_SYSMODULE_NOTIFICATION_UTIL); int r = sceNotificationUtilSendNotification(w); crumb("notifica diretta dall'app: carica 0x%x invio 0x%x", r0, r);
-        char m[96]; snprintf(m, sizeof m, "Prova: dall'app esito 0x%x (0 = riuscita)", (unsigned)r); toast_set(m); }
+        char m[96]; snprintf(m, sizeof m, T("Prova: dall'app esito 0x%x (0 = riuscita)"), (unsigned)r); toast_set(m); }
 #else
-      toast_set("Prova inviata: se il plugin e' attivo vedrai la notifica entro pochi secondi");
+      toast_set(T("Prova inviata: se il plugin e' attivo vedrai la notifica entro pochi secondi"));
 #endif
       break; }
-    case B_CAM_OPEN: { int r = cam_start(1); if (r < 0) r = cam_start(0); if (r < 0) { char t[64]; snprintf(t, sizeof t, "Fotocamera non disponibile (0x%x)", (unsigned)r); toast_set(t); } else screen = S_CAMERA; break; }
+    case B_CAM_OPEN: { int r = cam_start(1); if (r < 0) r = cam_start(0); if (r < 0) { char t[64]; snprintf(t, sizeof t, T("Fotocamera non disponibile (0x%x)"), (unsigned)r); toast_set(t); } else screen = S_CAMERA; break; }
     case B_CAM_SHOT: cam_shoot(); break;
     case B_CAM_FLIP: { int d = cam_dev ^ 1; cam_stop(); if (cam_start(d) < 0) cam_start(d ^ 1); break; }
-    case B_UPD_CHECK: { UpdInfo u; upd_snapshot(&u); if (u.state == UPD_AVAILABLE) u.state = UPD_IDLE; upd_check(1); toast_set("Controllo aggiornamenti..."); break; }
+    case B_UPD_CHECK: { UpdInfo u; upd_snapshot(&u); if (u.state == UPD_AVAILABLE) u.state = UPD_IDLE; upd_check(1); toast_set(T("Controllo aggiornamenti...")); break; }
     case B_UPD_CANCEL: upd_cancel(); break;
+    case B_LANG: screen = S_LANG; misc_scroll = 0; break;
+    case B_LANG_ROW: lang_select(arg); break;
     case B_UPD_BLOCK: break;
-    case B_COMM_NEW: ime_open(IME_COMM_NAME, "Nome della community", ""); break;
-    case B_COMM_HEAD: { jv *a = qarr("comm"); if (a && arg < a->count) { comm_sel_idx = arg; snprintf(comm_sel, sizeof comm_sel, "%s", json_str(a->items[arg], "id", "")); char tt[160]; snprintf(tt, sizeof tt, "%s", json_str(a->items[arg], "subject", "Community"));
-        popup_begin(tt); popup_add("Crea un gruppo nella community", A_COMM_GROUP, 0); popup_add("Rinomina", A_COMM_RENAME, 0); popup_add("Cambia descrizione", A_COMM_DESC, 0); popup_add("Esci dalla community", A_COMM_LEAVE, 1); popup_add("Chiudi", A_CLOSE, 0); } break; }
+    case B_COMM_NEW: ime_open(IME_COMM_NAME, T("Nome della community"), ""); break;
+    case B_COMM_HEAD: { jv *a = qarr("comm"); if (a && arg < a->count) { comm_sel_idx = arg; snprintf(comm_sel, sizeof comm_sel, "%s", json_str(a->items[arg], "id", "")); char tt[160]; snprintf(tt, sizeof tt, "%s", json_str(a->items[arg], "subject", T("Community")));
+        popup_begin(tt); popup_add(T("Crea un gruppo nella community"), A_COMM_GROUP, 0); popup_add(T("Rinomina"), A_COMM_RENAME, 0); popup_add(T("Cambia descrizione"), A_COMM_DESC, 0); popup_add(T("Esci dalla community"), A_COMM_LEAVE, 1); popup_add(T("Chiudi"), A_CLOSE, 0); } break; }
     case B_VIEW_SAVE: { Job *j = job_new(J_DOWNLOAD, view_jid); if (j) { snprintf(j->id, sizeof j->id, "%s", view_key_id); snprintf(j->kind, sizeof j->kind, "%s", view_is_video ? "vid" : "pic"); job_commit(); } break; }
-    case B_VIEW_REPLY: { int ci = chat_index(view_jid); if (ci >= 0) { if (!(screen == S_CHAT && cur_chat == ci)) open_chat(ci); viewer_open = 0; Msg *m = find_msg(view_key_id); snprintf(reply_id, sizeof reply_id, "%s", view_key_id); edit_id[0] = 0; snprintf(reply_name, sizeof reply_name, "%s", m && m->from_me ? "Tu" : (m && m->name[0] ? m->name : chats[ci].name)); snprintf(reply_text, sizeof reply_text, "%s", view_is_video ? "Video" : "Foto"); ime_open(IME_DRAFT, "Scrivi un messaggio", draft); } break; }
-    case B_VIEW_REACT: popup_begin("Reagisci"); { static const unsigned em[6] = { 0x1F44D, 0x2764, 0x1F602, 0x1F62E, 0x1F622, 0x1F64F }; for (int i = 0; i < 6; i++) { char t[16] = ""; append_cp(t, sizeof t, em[i]); popup_add(t, A_REACT_BASE + i, 0); } } break;
+    case B_VIEW_REPLY: { int ci = chat_index(view_jid); if (ci >= 0) { if (!(screen == S_CHAT && cur_chat == ci)) open_chat(ci); viewer_open = 0; Msg *m = find_msg(view_key_id); snprintf(reply_id, sizeof reply_id, "%s", view_key_id); edit_id[0] = 0; snprintf(reply_name, sizeof reply_name, "%s", m && m->from_me ? T("Tu") : (m && m->name[0] ? m->name : chats[ci].name)); snprintf(reply_text, sizeof reply_text, "%s", view_is_video ? T("Video") : T("Foto")); ime_open(IME_DRAFT, T("Scrivi un messaggio"), draft); } break; }
+    case B_VIEW_REACT: popup_begin(T("Reagisci")); { static const unsigned em[6] = { 0x1F44D, 0x2764, 0x1F602, 0x1F62E, 0x1F622, 0x1F64F }; for (int i = 0; i < 6; i++) { char t[16] = ""; append_cp(t, sizeof t, em[i]); popup_add(t, A_REACT_BASE + i, 0); } } break;
     case B_THEME_UI: popup_act(A_TOGGLE_UI); break;
     case B_FAB: build_contacts(); misc_scroll = 0; screen = S_NEWCHAT; break;
     case B_SEARCH_ICON: search_scope[0] = 0; search_q[0] = 0; search_from = S_LIST; misc_scroll = 0; screen = S_SEARCH; qtag[0] = 0; ime_next = IME_SEARCH; break;
-    case B_LISTMENU: popup_begin(""); popup_add("Nuovo gruppo", A_NEW_GROUP, 0); popup_add(show_archived ? "Tutte le chat" : "Chat archiviate", A_LIST_ARCHIVED, 0); popup_add(ui_k < 1.2f ? "Dimensione: normale" : ui_k < 1.8f ? "Dimensione: grande" : "Dimensione: molto grande", A_TOGGLE_SCALE, 0); popup_add(ui_dark ? "Tema chiaro" : "Tema scuro", A_TOGGLE_UI, 0); popup_add(receipts_on ? "Conferma viste storie: SI" : "Conferma viste storie: NO", A_TOGGLE_RECEIPTS, 0); popup_add("Profilo", A_LIST_PROFILE, 0); popup_add("Esci dall'app", A_QUIT, 0); break;
+    case B_LISTMENU: popup_begin(""); popup_add(T("Nuovo gruppo"), A_NEW_GROUP, 0); popup_add(show_archived ? T("Tutte le chat") : T("Chat archiviate"), A_LIST_ARCHIVED, 0); popup_add(ui_k < 1.2f ? T("Dimensione: normale") : ui_k < 1.8f ? T("Dimensione: grande") : T("Dimensione: molto grande"), A_TOGGLE_SCALE, 0); popup_add(ui_dark ? T("Tema chiaro") : T("Tema scuro"), A_TOGGLE_UI, 0); popup_add(receipts_on ? T("Conferma viste storie: SI") : T("Conferma viste storie: NO"), A_TOGGLE_RECEIPTS, 0); popup_add(T("Profilo"), A_LIST_PROFILE, 0); popup_add(T("Esci dall'app"), A_QUIT, 0); break;
     case B_CHATMENU: if (cur_chat >= 0) popup_chat_menu(); break;
     case B_HEADER_INFO: popup_act(A_VIEW_CONTACT); break;
     case B_POPUP_CLOSE: popup_open = 0; break;
     case B_POPUP_ITEM: if (arg >= 0 && arg < npit) popup_act(pit[arg].act == A_CLOSE ? A_CLOSE : pit[arg].act); break;
     case B_UNBLOCK_BAR: popup_act(A_UNBLOCK); break;
-    case B_SEARCH_BOX: ime_open(IME_SEARCH, "Cerca", search_q); break;
+    case B_SEARCH_BOX: ime_open(IME_SEARCH, T("Cerca"), search_q); break;
     case B_SEARCH_ROW: { jv *o = qobj("search"); if (!o) break; if (arg >= 1000) { jv *ms = json_get(o, "messages"); if (ms && arg - 1000 < ms->count) open_by_jid(json_str(ms->items[arg - 1000], "jid", "")); } else { jv *cs = json_get(o, "chats"); if (cs && arg < cs->count) open_by_jid(json_str(cs->items[arg], "jid", "")); } break; }
     case B_NC_GROUP: ngsel = 0; gsubject[0] = 0; misc_scroll = 0; screen = S_GROUP; break;
-    case B_NC_CONTACT: ime_open(IME_NUMBER, "Numero con prefisso (es. 393331234567)", ""); break;
+    case B_NC_CONTACT: ime_open(IME_NUMBER, T("Numero con prefisso (es. 393331234567)"), ""); break;
     case B_NC_ROW: open_chat(arg); break;
-    case B_GR_SUBJECT: ime_open(IME_GSUBJECT, "Nome del gruppo", gsubject); break;
+    case B_GR_SUBJECT: ime_open(IME_GSUBJECT, T("Nome del gruppo"), gsubject); break;
     case B_GR_ROW: { int k = gsel_has(chats[arg].jid); if (k >= 0) { memmove(gsel[k], gsel[k + 1], (size_t)(ngsel - k - 1) * 160); ngsel--; } else if (ngsel < 40) snprintf(gsel[ngsel++], 160, "%s", chats[arg].jid); break; }
     case B_GR_CREATE: if (gsubject[0] && ngsel > 0) {
         char body[2100], sj[260]; jesc(gsubject, sj, sizeof sj); int k = snprintf(body, sizeof body, "{\"subject\":\"%s\",\"jids\":[", sj);
         for (int i = 0; i < ngsel && k < (int)sizeof body - 200; i++) k += snprintf(body + k, sizeof body - k, "%s\"%s\"", i ? "," : "", gsel[i]);
-        snprintf(body + k, sizeof body - k, "]}"); fire("/group/create", body, "Gruppo creato"); screen = S_LIST;
-      } else toast_set("Serve un nome e almeno un partecipante");
+        snprintf(body + k, sizeof body - k, "]}"); fire("/group/create", body, T("Gruppo creato")); screen = S_LIST;
+      } else toast_set(T("Serve un nome e almeno un partecipante"));
       break;
-    case B_CT_BLOCK: { int bl = arg; fire_jid("/block", contact_jid, bl ? ",\"block\":false" : ",\"block\":true", bl ? "Contatto sbloccato" : "Contatto bloccato"); int ci = chat_index(contact_jid); if (ci >= 0) chats[ci].blocked = !bl; query_jid("contact", "/contact/", contact_jid, ""); break; }
+    case B_CT_BLOCK: { int bl = arg; fire_jid("/block", contact_jid, bl ? ",\"block\":false" : ",\"block\":true", bl ? T("Contatto sbloccato") : T("Contatto bloccato")); int ci = chat_index(contact_jid); if (ci >= 0) chats[ci].blocked = !bl; query_jid("contact", "/contact/", contact_jid, ""); break; }
     case B_MEDIA_TAB: media_tab = arg; misc_scroll = 0; media_query(); break;
     case B_MEDIA_ITEM: { jv *a = qarr("list"); if (a && arg < a->count) { snprintf(view_jid, sizeof view_jid, "%s", media_jid); snprintf(view_key_id, sizeof view_key_id, "%s", json_str(a->items[arg], "id", "")); view_is_video = !strcmp(json_str(a->items[arg], "kind", ""), "video"); viewer_open = 1; } break; }
     case B_DOC_ITEM: { jv *a = qarr("list"); if (a && arg < a->count) { Job *j = job_new(J_DOWNLOAD, media_jid); if (j) { snprintf(j->id, sizeof j->id, "%s", json_str(a->items[arg], "id", "")); snprintf(j->text, sizeof j->text, "%s", json_str(a->items[arg], "fname", "documento")); job_commit(); } } break; }
     case B_UPD_ROW: st_mine = 0; st_idx = arg; st_item = 0; screen = S_STATUSVIEW; break;
-    case B_UPD_MY: { jv *my = qres2_arr("mystatus"); if (my && my->count) { st_mine = 1; st_idx = 0; st_item = 0; screen = S_STATUSVIEW; } else { popup_begin("Nuova storia"); popup_add("Testo", A_STORY_TEXT, 0); popup_add("Foto", A_STORY_PHOTO, 0); popup_add("Annulla", A_CLOSE, 0); } break; }
-    case B_STORY_NEW: popup_begin("Nuova storia"); popup_add("Testo", A_STORY_TEXT, 0); popup_add("Foto", A_STORY_PHOTO, 0); popup_add("Annulla", A_CLOSE, 0); break;
-    case B_FOLLOW_CH: ime_open(IME_CHLINK, "Link del canale", ""); break;
+    case B_UPD_MY: { jv *my = qres2_arr("mystatus"); if (my && my->count) { st_mine = 1; st_idx = 0; st_item = 0; screen = S_STATUSVIEW; } else { popup_begin(T("Nuova storia")); popup_add(T("Testo"), A_STORY_TEXT, 0); popup_add(T("Foto"), A_STORY_PHOTO, 0); popup_add(T("Annulla"), A_CLOSE, 0); } break; }
+    case B_STORY_NEW: popup_begin(T("Nuova storia")); popup_add(T("Testo"), A_STORY_TEXT, 0); popup_add(T("Foto"), A_STORY_PHOTO, 0); popup_add(T("Annulla"), A_CLOSE, 0); break;
+    case B_FOLLOW_CH: ime_open(IME_CHLINK, T("Link del canale"), ""); break;
     case B_ST_VIEWERS: { jv *its = qres2_arr("mystatus"); if (its && st_item < its->count) { char e[100], pth[200]; url_enc(json_str(its->items[st_item], "id", ""), e, sizeof e); snprintf(pth, sizeof pth, "/viewers/%s", e); query2("viewers", pth); viewers_wait = 1; } break; }
     case B_ST_PREV: if (st_item > 0) st_item--; break;
     case B_ST_NEXT: { jv *a = qarr("updates"); jv *its = st_mine ? qres2_arr("mystatus") : (a && st_idx < a->count ? json_get(a->items[st_idx], "items") : NULL); if (its && st_item + 1 < its->count) st_item++; else screen = S_UPDATES; break; }
@@ -797,18 +837,18 @@ static void handle_ime_extra(int ctx, const char *t) {
   switch (ctx) {
     case IME_SEARCH: snprintf(search_q, sizeof search_q, "%s", t); url_enc(t, e, sizeof e); url_enc(search_scope, e2, sizeof e2); snprintf(p, sizeof p, "/search?q=%s&jid=%s", e, e2); misc_scroll = 0; query("search", p); break;
     case IME_NUMBER: snprintf(nc_number, sizeof nc_number, "%s", t); ime_next = IME_CNAME; break;
-    case IME_CNAME: url_enc(nc_number, e, sizeof e); url_enc(t, e2, sizeof e2); snprintf(p, sizeof p, "/checknumber?num=%s&name=%s", e, e2); qtag[0] = 0; query("chk", p); nc_check = 1; toast_set("Controllo numero..."); break;
+    case IME_CNAME: url_enc(nc_number, e, sizeof e); url_enc(t, e2, sizeof e2); snprintf(p, sizeof p, "/checknumber?num=%s&name=%s", e, e2); qtag[0] = 0; query("chk", p); nc_check = 1; toast_set(T("Controllo numero...")); break;
     case IME_BRIDGE: { char u[256]; snprintf(u, sizeof u, "%s", t); for (char *q = u; *q; q++) if (*q == ' ' || *q == '\n') *q = 0;
       if (u[0] && strncmp(u, "http", 4)) { char v[300]; snprintf(v, sizeof v, "http://%s", u); snprintf(u, sizeof u, "%s", v); }
       if (!strchr(u + 7, ':') && u[0]) strncat(u, ":8787", sizeof u - strlen(u) - 1);
-      if (u[0]) { pthread_mutex_lock(&mu); snprintf(base_url, sizeof base_url, "%s", u); pthread_mutex_unlock(&mu); save_base_url(u); toast_set("Indirizzo salvato"); } break; }
-    case IME_STORYTEXT: if (t[0]) { snprintf(story_text, sizeof story_text, "%s", t); popup_begin("Colore di sfondo"); const char *cn[6] = { "Verde", "Blu", "Viola", "Rosso", "Arancio", "Grigio" }; for (int i = 0; i < 6; i++) popup_add(cn[i], A_STORY_COL_BASE + i, 0); } break;
-    case IME_CHLINK: if (t[0]) { char e[700], b[800]; jesc(t, e, sizeof e); snprintf(b, sizeof b, "{\"link\":\"%s\"}", e); fire("/channel/follow", b, "Canale seguito"); } break;
+      if (u[0]) { pthread_mutex_lock(&mu); snprintf(base_url, sizeof base_url, "%s", u); pthread_mutex_unlock(&mu); save_base_url(u); toast_set(T("Indirizzo salvato")); } break; }
+    case IME_STORYTEXT: if (t[0]) { snprintf(story_text, sizeof story_text, "%s", t); popup_begin(T("Colore di sfondo")); const char *cn[6] = { T("Verde"), T("Blu"), T("Viola"), T("Rosso"), T("Arancio"), T("Grigio") }; for (int i = 0; i < 6; i++) popup_add(cn[i], A_STORY_COL_BASE + i, 0); } break;
+    case IME_CHLINK: if (t[0]) { char e[700], b[800]; jesc(t, e, sizeof e); snprintf(b, sizeof b, "{\"link\":\"%s\"}", e); fire("/channel/follow", b, T("Canale seguito")); } break;
     case IME_COMM_NAME: if (t[0]) { snprintf(comm_name_tmp, sizeof comm_name_tmp, "%s", t); ime_next = IME_COMM_DESC; } break;
-    case IME_COMM_DESC: { char e1[300], e2[2100], b[2500]; jesc(comm_name_tmp, e1, sizeof e1); jesc(t, e2, sizeof e2); snprintf(b, sizeof b, "{\"subject\":\"%s\",\"description\":\"%s\"}", e1, e2); fire("/community/create", b, "Community creata"); comm_refresh_at = frame_no + 360; break; }
-    case IME_COMM_GNAME: if (t[0]) { char e1[300], b[600]; jesc(t, e1, sizeof e1); snprintf(b, sizeof b, "{\"id\":\"%s\",\"subject\":\"%s\"}", comm_sel, e1); fire("/community/creategroup", b, "Gruppo creato"); comm_refresh_at = frame_no + 360; } break;
-    case IME_COMM_RENAME: if (t[0]) { char e1[300], b[600]; jesc(t, e1, sizeof e1); snprintf(b, sizeof b, "{\"id\":\"%s\",\"subject\":\"%s\"}", comm_sel, e1); fire("/community/rename", b, "Community rinominata"); comm_refresh_at = frame_no + 240; } break;
-    case IME_COMM_DESC2: { char e2[2100], b[2400]; jesc(t, e2, sizeof e2); snprintf(b, sizeof b, "{\"id\":\"%s\",\"description\":\"%s\"}", comm_sel, e2); fire("/community/description", b, "Descrizione aggiornata"); break; }
+    case IME_COMM_DESC: { char e1[300], e2[2100], b[2500]; jesc(comm_name_tmp, e1, sizeof e1); jesc(t, e2, sizeof e2); snprintf(b, sizeof b, "{\"subject\":\"%s\",\"description\":\"%s\"}", e1, e2); fire("/community/create", b, T("Community creata")); comm_refresh_at = frame_no + 360; break; }
+    case IME_COMM_GNAME: if (t[0]) { char e1[300], b[600]; jesc(t, e1, sizeof e1); snprintf(b, sizeof b, "{\"id\":\"%s\",\"subject\":\"%s\"}", comm_sel, e1); fire("/community/creategroup", b, T("Gruppo creato")); comm_refresh_at = frame_no + 360; } break;
+    case IME_COMM_RENAME: if (t[0]) { char e1[300], b[600]; jesc(t, e1, sizeof e1); snprintf(b, sizeof b, "{\"id\":\"%s\",\"subject\":\"%s\"}", comm_sel, e1); fire("/community/rename", b, T("Community rinominata")); comm_refresh_at = frame_no + 240; } break;
+    case IME_COMM_DESC2: { char e2[2100], b[2400]; jesc(t, e2, sizeof e2); snprintf(b, sizeof b, "{\"id\":\"%s\",\"description\":\"%s\"}", comm_sel, e2); fire("/community/description", b, T("Descrizione aggiornata")); break; }
     case IME_GSUBJECT: snprintf(gsubject, sizeof gsubject, "%s", t); break;
   }
 }
@@ -822,11 +862,11 @@ static void extra_tick(void) {
       int failed_before = !strcmp(u.last_fail_tag, u.tag) && u.last_fail_code;
       prompted_tag_set = 1; snprintf(prompted, sizeof prompted, "%s", u.tag);
       if (u.can_install && !(failed_before && u.quiet)) { crumb("aggiornamento automatico a %s", u.tag); upd_install(); }   // obbligatorio: parte da solo, senza chiedere
-      else if (u.can_install) { char tt[160]; snprintf(tt, sizeof tt, "Aggiornamento %s non riuscito prima (codice %08X)", u.tag, (unsigned)u.last_fail_code); popup_begin(tt); popup_add("Riprova", A_UPD_RETRY, 0); popup_add("Chiudi", A_UPD_LATER, 0); }
-      else { char tt[160]; snprintf(tt, sizeof tt, "Nuova versione %s: installa la versione completa", u.tag); popup_begin(tt); popup_add("Scarica il pacchetto", A_UPD_NOW, 0); popup_add("Piu' tardi", A_UPD_LATER, 0); }
+      else if (u.can_install) { char tt[160]; snprintf(tt, sizeof tt, T("Aggiornamento %s non riuscito prima (codice %08X)"), u.tag, (unsigned)u.last_fail_code); popup_begin(tt); popup_add(T("Riprova"), A_UPD_RETRY, 0); popup_add(T("Chiudi"), A_UPD_LATER, 0); }
+      else { char tt[160]; snprintf(tt, sizeof tt, T("Nuova versione %s: installa la versione completa"), u.tag); popup_begin(tt); popup_add(T("Scarica il pacchetto"), A_UPD_NOW, 0); popup_add(T("Piu' tardi"), A_UPD_LATER, 0); }
     }
-    if (u.state == UPD_UPTODATE) { if (!u.quiet) { char t[96]; snprintf(t, sizeof t, "Gia' aggiornato (%s)", u.current); toast_set(t); } upd_dismiss(); }
-    if (u.state == UPD_ERROR && !popup_open && !ime_active) { if (u.quiet) upd_dismiss(); else { popup_begin(u.msg); if (u.can_install && u.tag[0]) popup_add("Riprova", A_UPD_RETRY, 0); popup_add("Chiudi", A_UPD_ERR, 0); upd_dismiss(); } }   // dismiss subito: il popup non si riapre in ciclo
+    if (u.state == UPD_UPTODATE) { if (!u.quiet) { char t[96]; snprintf(t, sizeof t, T("Gia' aggiornato (%s)"), u.current); toast_set(t); } upd_dismiss(); }
+    if (u.state == UPD_ERROR && !popup_open && !ime_active) { if (u.quiet) upd_dismiss(); else { popup_begin(u.msg); if (u.can_install && u.tag[0]) popup_add(T("Riprova"), A_UPD_RETRY, 0); popup_add(T("Chiudi"), A_UPD_ERR, 0); upd_dismiss(); } }   // dismiss subito: il popup non si riapre in ciclo
   }
   if (!viewer_open) { pthread_mutex_lock(&mu); for (int i = 0; i < nmed; i++) if (med[i].big || med[i].braw || med[i].bstate) { if (med[i].bstate == 3) continue; tex_retire(med[i].big); med[i].big = NULL; free(med[i].braw); med[i].braw = NULL; med[i].bstate = 0; } pthread_mutex_unlock(&mu); }   // la foto grande pesa: si libera appena si chiude il visualizzatore
   { // dopo una notifica: se l'app viene aperta entro 10 minuti porta direttamente nella chat del messaggio (il bridge se la ricorda)
@@ -870,33 +910,34 @@ static void extra_tick(void) {
         else if (k == 'y') { menu_open = 1; snprintf(menu_id, sizeof menu_id, "%s", msgs[nmsgs - 1].id); }
         else if (k == 'b') { snprintf(draft, sizeof draft, "Ciao, questo e' un messaggio di prova abbastanza lungo"); emoji_open = 1; } } }
     else if (dbg_key == 'p') { dbg_key = 0; screen = S_PROFILE; }
+    else if (dbg_key == 'l') { dbg_key = 0; screen = S_LANG; misc_scroll = 0; }
     else if (dbg_key == 'a') { dbg_key = 0; screen = S_PROFILE; popup_open_about(); }
     else if (dbg_key == 'c') { for (int i = 0; i < nchats; i++) if (chats[i].channel) { dbg_key = 0; open_chat(i); break; } } }
   if (refresh_my_at && frame_no >= refresh_my_at) { refresh_my_at = 0; query2("mystatus", "/mystatus"); my_q_frame = frame_no; }
   if (viewers_wait) { jv *v = qres2_arr("viewers"); if (v) {
-      viewers_wait = 0; popup_begin("Visualizzazioni");
+      viewers_wait = 0; popup_begin(T("Visualizzazioni"));
       for (int i = 0; i < v->count && i < 9; i++) { char tm[16], l[64]; fmt_time((long)json_num(v->items[i], "ts", 0), tm, sizeof tm, 1); snprintf(l, sizeof l, "%.40s  %s", json_str(v->items[i], "name", ""), tm); popup_add(l, A_CLOSE, 0); }
-      if (!v->count) popup_add("Nessuno l'ha ancora vista", A_CLOSE, 0); popup_add("Chiudi", A_CLOSE, 0); } }
+      if (!v->count) popup_add(T("Nessuno l'ha ancora vista"), A_CLOSE, 0); popup_add(T("Chiudi"), A_CLOSE, 0); } }
 #ifndef SAFE_BUILD
   { static int nag; alive_poll(); if (!nag && alive_state() >= 0 && screen == S_LIST && !popup_open && !ime_active && plugin_upd_checked) {   // dopo ~45 s: se il plugin e' installato ma il suo file di stato non cambia, lo dico
       nag = 1;
-      if (plugin_installed() && alive_state() == 0) { crumb("plugin installato ma non attivo (file di stato fermo)"); popup_begin("Il plugin delle notifiche non e' attivo"); popup_add("Riavvia la Vita ora", A_REBOOT, 0); popup_add("Piu' tardi", A_CLOSE, 0); } } }
+      if (plugin_installed() && alive_state() == 0) { crumb("plugin installato ma non attivo (file di stato fermo)"); popup_begin(T("Il plugin delle notifiche non e' attivo")); popup_add(T("Riavvia la Vita ora"), A_REBOOT, 0); popup_add(T("Piu' tardi"), A_CLOSE, 0); } } }
 #endif
   crash_pending = 0;   // l'uscita non pulita (es. chiusura dalla Vita) resta solo nel registro: nessuna finestra
   if ((screen == S_LIST || screen == S_LOGIN) && !ime_active && !popup_open && !crash_pending && !plugin_upd_checked) {
     plugin_upd_checked = 1;
 #ifndef SAFE_BUILD
-    if (plugin_installed() && plugin_differs()) { crumb("aggiorno il plugin notifiche"); if (install_plugin()) { toast_set("Plugin notifiche aggiornato"); ask_reboot(); } }
+    if (plugin_installed() && plugin_differs()) { crumb("aggiorno il plugin notifiche"); if (install_plugin()) { toast_set(T("Plugin notifiche aggiornato")); ask_reboot(); } }
 #endif
   }
   if ((screen == S_LIST || screen == S_LOGIN) && !ime_active && !popup_open && !crash_pending && plugin_upd_checked) plugin_prompt_once();
   if (ime_next && !ime_active) {
     int c = ime_next; ime_next = 0;
-    if (c == IME_SEARCH) ime_open(IME_SEARCH, "Cerca", search_q);
-    else if (c == IME_CNAME) ime_open(IME_CNAME, "Nome (facoltativo)", "");
-    else if (c == IME_COMM_DESC) ime_open(IME_COMM_DESC, "Descrizione (facoltativa)", "");
+    if (c == IME_SEARCH) ime_open(IME_SEARCH, T("Cerca"), search_q);
+    else if (c == IME_CNAME) ime_open(IME_CNAME, T("Nome (facoltativo)"), "");
+    else if (c == IME_COMM_DESC) ime_open(IME_COMM_DESC, T("Descrizione (facoltativa)"), "");
   }
-  if (nc_check) { jv *o = qobj("chk"); if (o) { nc_check = 0; if (json_bool(o, "exists", 0)) { snprintf(open_after, sizeof open_after, "%s", json_str(o, "jid", "")); open_after_t = 180; } else toast_set("Numero non presente su WhatsApp"); } }
+  if (nc_check) { jv *o = qobj("chk"); if (o) { nc_check = 0; if (json_bool(o, "exists", 0)) { snprintf(open_after, sizeof open_after, "%s", json_str(o, "jid", "")); open_after_t = 180; } else toast_set(T("Numero non presente su WhatsApp")); } }
   if (open_after[0]) { int i = chat_index(open_after); if (i >= 0) { open_chat(i); open_after[0] = 0; } else if (--open_after_t <= 0) open_after[0] = 0; }
 }
 static void extra_init(void) {

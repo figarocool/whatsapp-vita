@@ -11,7 +11,7 @@ set(VITA_APP_NAME "WhatsApp")
 set(VITA_TITLEID  "WHAP00001")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -Wall -std=gnu11")
 
-set(SRCS src/main.c src/json.c src/net.c src/updater.c src/sharedfb_stub.c)
+set(SRCS src/main.c src/json.c src/net.c src/updater.c src/i18n.c src/i18n_data.c src/sharedfb_stub.c)
 add_executable(${PROJECT_NAME} ${SRCS})
 add_executable(whatsapp_safe ${SRCS})
 target_compile_definitions(whatsapp_safe PRIVATE SAFE_BUILD=1)
@@ -38,17 +38,26 @@ set(COMMON_FILES
   FILE assets/emoji.png assets/emoji.png
   FILE assets/emoji.bin assets/emoji.bin
   FILE assets/cacert.pem assets/cacert.pem
+  FILE assets/font-ja.ttf assets/font-ja.ttf
+  FILE assets/font-ko.ttf assets/font-ko.ttf
+  FILE assets/font-zhs.ttf assets/font-zhs.ttf
+  FILE assets/font-zht.ttf assets/font-zht.ttf
   FILE ${CMAKE_CURRENT_BINARY_DIR}/version.txt assets/version.txt)
 
 # Installatore (WHAPUPD01): app separata che chiude WhatsApp, installa il pacchetto scaricato e la riapre.
 add_executable(wa_updater helper/updater_helper.c)
 target_compile_options(wa_updater PRIVATE -Wall -O2)
-target_link_libraries(wa_updater mbedcrypto m SceDisplay_stub SceSysmem_stub SceAppMgr_stub ScePromoterUtil_stub SceSysmodule_stub SceIofilemgr_stub SceLibKernel_stub SceKernelModulemgr_stub SceKernelThreadMgr_stub)
+target_link_libraries(wa_updater mbedcrypto z m SceDisplay_stub SceSysmem_stub SceAppMgr_stub ScePromoterUtil_stub SceSysmodule_stub SceIofilemgr_stub SceLibKernel_stub SceKernelModulemgr_stub SceKernelThreadMgr_stub)
 vita_create_self(wa-updater-eboot.bin wa_updater UNSAFE)
 set(VITA_PACK_VPK_FLAGS "")   # vita_create_vpk accumula i file di una chiamata nella successiva: si azzera ogni volta
+file(GLOB UPDATE_SCREENS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/assets/update-screen-*.z)
+set(UPDATE_SCREEN_FILES "")
+foreach(f ${UPDATE_SCREENS})
+  list(APPEND UPDATE_SCREEN_FILES FILE ${f} ${f})
+endforeach()
 vita_create_vpk(wa-updater.vpk WHAPUPD01 wa-updater-eboot.bin VERSION "01.00" NAME "WhatsApp Updater"
   FILE assets/vitashell-head.bin assets/vitashell-head.bin
-  FILE assets/update-screen.raw assets/update-screen.raw)
+  ${UPDATE_SCREEN_FILES})
 
 # versione completa: permessi estesi, puo' installare il plugin notifiche e aggiornarsi da sola
 vita_create_self(${PROJECT_NAME}.self ${PROJECT_NAME} UNSAFE)

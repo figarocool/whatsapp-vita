@@ -23,6 +23,7 @@
 #include <math.h>
 #include <jpeglib.h>
 #include "updater.h"
+#include "i18n.h"
 #include <psp2/camera.h>
 #include <psp2/kernel/sysmem.h>
 #include "json.h"
@@ -84,6 +85,7 @@ static void apply_ui_theme(int dark) {
 }
 
 static vita2d_font *font;                       // istanza principale (compatibilita')
+static vita2d_font *font_override;             // se impostato, etext usa questo font (serve a scrivere il nome di ogni lingua con il suo font)
 static vita2d_font *fonts[4];                   // quattro cache di caratteri separate (ognuna ha il suo atlante 512x512): piccolo / medio / grande / titoli
 static int quant_size(int p) { static const int q[] = { 18, 22, 26, 30, 34, 40, 46, 54, 62, 72 }; int best = q[0]; for (int i = 0; i < 10; i++) if (abs(p - q[i]) < abs(p - best)) best = q[i]; return best; }   // poche dimensioni diverse: la cache non si riempie
 static vita2d_font *font_for(int psize) { return psize <= 24 ? fonts[0] : psize <= 32 ? fonts[1] : psize <= 42 ? fonts[2] : fonts[3]; }
@@ -93,6 +95,19 @@ static int fw(vita2d_font *f, int psize, const char *s) {
   unsigned long long h = 1469598103934665603ULL; for (const unsigned char *p = (const unsigned char *)s; *p; p++) { h ^= *p; h *= 1099511628211ULL; } h ^= ((unsigned long long)psize << 56) | 1ULL;
   unsigned i = (unsigned)(h & 4095); if (wcache[i].key == h) return wcache[i].w;
   int w = vita2d_font_text_width(f, psize, s); wcache[i].key = h; wcache[i].w = w; return w;
+}
+static void crumb(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+// font dell'interfaccia: Roboto per le lingue latine e cirilliche, un font dedicato per giapponese, coreano e cinese
+static char font_path_loaded[64]; static int font_loaded_once; static int cjk_ok;   // cjk_ok: con un font asiatico attivo si disegnano anche gli ideogrammi
+#define ROBOTO_PATH "app0:assets/Roboto-Regular.ttf"
+static const char *font_wanted(void) { const char *p = i18n_font_path(i18n_lang()); return p ? p : ROBOTO_PATH; }
+static void load_fonts(void) {
+  const char *p = font_wanted(); vita2d_font *nf[5];
+  for (int i = 0; i < 5; i++) { nf[i] = vita2d_load_font_file(p); if (!nf[i]) { crumb("font NON caricato: %s (uso Roboto)", p); nf[i] = vita2d_load_font_file(ROBOTO_PATH); } }
+  crumb("font caricato: %s", p);
+  if (font_loaded_once) { vita2d_wait_rendering_done(); vita2d_free_font(font); for (int i = 0; i < 4; i++) vita2d_free_font(fonts[i]); }
+  font = nf[0]; for (int i = 0; i < 4; i++) fonts[i] = nf[i + 1];
+  memset(wcache, 0, sizeof wcache); snprintf(font_path_loaded, sizeof font_path_loaded, "%s", p); font_loaded_once = 1; cjk_ok = i18n_font_path(i18n_lang()) != NULL;
 }
 // texture da liberare: mai in mezzo al disegno, ma al frame successivo (la GPU potrebbe ancora usarle)
 static vita2d_texture *dead_tex[96]; static int ndead;
@@ -228,16 +243,16 @@ static void run_job(Job *j, const char *base) {
       jesc(j->text, t, sizeof t);
       snprintf(body, sizeof body, "{\"jid\":\"%s\",\"text\":\"%s\",\"quote\":\"%s\",\"edit\":\"%s\"}", j->jid, t, j->id, j->extra);
       snprintf(url, sizeof url, "%s/send", base);
-      if (http_post_json(url, body)) toast_set("Invio non riuscito");
+      if (http_post_json(url, body)) toast_set(T("Invio non riuscito"));
       break;
     }
     case J_MEDIA: {
       size_t len; unsigned char *buf = read_file(j->path, &len);
-      if (!buf) { toast_set("File non leggibile (max 30 MB)"); break; }
+      if (!buf) { toast_set(T("File non leggibile (max 30 MB)")); break; }
       url_enc(j->jid, e1, sizeof e1); url_enc(base_name(j->path), e2, sizeof e2); url_enc(j->text, e3, sizeof e3); url_enc(j->id, e4, sizeof e4);
       if (!strcmp(j->kind, "status")) snprintf(url, sizeof url, "%s/status/postmedia?caption=%s", base, e3);
       else snprintf(url, sizeof url, "%s/sendmedia?jid=%s&kind=%s&name=%s&caption=%s&quote=%s", base, e1, j->kind, e2, e3, e4);
-      if (http_post_buf(url, buf, len, "application/octet-stream")) toast_set("Invio allegato non riuscito"); else toast_set("Allegato inviato");
+      if (http_post_buf(url, buf, len, "application/octet-stream")) toast_set(T("Invio allegato non riuscito")); else toast_set(T("Allegato inviato"));
       free(buf); break;
     }
     case J_REACT: case J_DELETE: {
@@ -245,22 +260,22 @@ static void run_job(Job *j, const char *base) {
       jesc(j->text, t, sizeof t);
       snprintf(body, sizeof body, "{\"jid\":\"%s\",\"id\":\"%s\",\"emoji\":\"%s\"}", j->jid, j->id, t);
       snprintf(url, sizeof url, "%s/%s", base, j->type == J_REACT ? "react" : "delete");
-      if (http_post_json(url, body)) toast_set("Operazione non riuscita");
+      if (http_post_json(url, body)) toast_set(T("Operazione non riuscita"));
       break;
     }
     case J_PROFILE: {
       char t[700], body[1200]; jesc(j->text, t, sizeof t);
       snprintf(body, sizeof body, "{\"%s\":\"%s\"}", j->kind, t);
       snprintf(url, sizeof url, "%s/profile", base);
-      if (http_post_json(url, body)) toast_set("Profilo non aggiornato"); else toast_set("Profilo aggiornato");
+      if (http_post_json(url, body)) toast_set(T("Profilo non aggiornato")); else toast_set(T("Profilo aggiornato"));
       break;
     }
     case J_PHOTO: {
       size_t len; unsigned char *buf = read_file(j->path, &len);
-      if (!buf) { toast_set("Immagine non leggibile"); break; }
+      if (!buf) { toast_set(T("Immagine non leggibile")); break; }
       snprintf(url, sizeof url, "%s/profile/photo", base);
-      if (http_post_buf(url, buf, len, "application/octet-stream")) toast_set("Foto non aggiornata");
-      else { toast_set("Foto profilo aggiornata"); pthread_mutex_lock(&mu); Avatar *a = av_find(j->jid, 0); if (a && a->state != 3) a->state = 0; pthread_mutex_unlock(&mu); }
+      if (http_post_buf(url, buf, len, "application/octet-stream")) toast_set(T("Foto non aggiornata"));
+      else { toast_set(T("Foto profilo aggiornata")); pthread_mutex_lock(&mu); Avatar *a = av_find(j->jid, 0); if (a && a->state != 3) a->state = 0; pthread_mutex_unlock(&mu); }
       free(buf); break;
     }
     case J_DOWNLOAD: {
@@ -268,8 +283,8 @@ static void run_job(Job *j, const char *base) {
       url_enc(j->jid, e, sizeof e); url_enc(j->id, e2b, sizeof e2b);
       int isvid = !strcmp(j->kind, "vid");
       snprintf(url, sizeof url, "%s/%s/%s/%s", base, isvid ? "vita-video" : "file", e, e2b);   // i video passano dal bridge che li converte per la Vita
-      toast_set(isvid ? "Converto il video per la Vita (puo' volerci un minuto)..." : "Download in corso...");
-      if (http_get_t(url, &buf, &len, isvid ? 420 : 60)) { toast_set(isvid ? "Video non disponibile (scaduto su WhatsApp o conversione fallita)" : "Download non riuscito (file scaduto?)"); break; }
+      toast_set(isvid ? T("Converto il video per la Vita (puo' volerci un minuto)...") : T("Download in corso..."));
+      if (http_get_t(url, &buf, &len, isvid ? 420 : 60)) { toast_set(isvid ? T("Video non disponibile (scaduto su WhatsApp o conversione fallita)") : T("Download non riuscito (file scaduto?)")); break; }
       char fn[300]; int pic = !strcmp(j->kind, "pic"), vid = !strcmp(j->kind, "vid");
       if (pic || vid) {   // foto e video ricevuti: salvati dove li trovi dal sistema
         const char *top = pic ? "ux0:picture" : "ux0:video"; char dir[64]; snprintf(dir, sizeof dir, "%s/WhatsApp", top); sceIoMkdir(top, 0777); sceIoMkdir(dir, 0777);
@@ -281,8 +296,8 @@ static void run_job(Job *j, const char *base) {
         for (char *p = fn + 28; *p; p++) if (*p == '/' || *p == ':' || *p == '\\') *p = '_';
       }
       SceUID f = sceIoOpen(fn, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
-      if (f >= 0) { size_t w = 0; while (w < len) { int r = sceIoWrite(f, buf + w, len - w); if (r <= 0) break; w += r; } sceIoClose(f); if (pic) toast_set("Foto salvata in ux0:picture/WhatsApp"); else if (vid) toast_set("Video convertito e salvato in ux0:video/WhatsApp (apri l'app Video)"); else toast_set("Salvato in ux0:data/whatsapp/downloads"); }
-      else toast_set("Impossibile salvare il file");
+      if (f >= 0) { size_t w = 0; while (w < len) { int r = sceIoWrite(f, buf + w, len - w); if (r <= 0) break; w += r; } sceIoClose(f); if (pic) toast_set(T("Foto salvata in ux0:picture/WhatsApp")); else if (vid) toast_set(T("Video convertito e salvato in ux0:video/WhatsApp (apri l'app Video)")); else toast_set(T("Salvato in ux0:data/whatsapp/downloads")); }
+      else toast_set(T("Impossibile salvare il file"));
       free(buf); break;
     }
     case J_QUERY: {
@@ -290,7 +305,7 @@ static void run_job(Job *j, const char *base) {
       if (j->text[0]) r = http_post_json_resp(url, j->text, &resp); else { size_t l; r = http_get(url, &resp, &l); }
       jv *v = (r == 0 && resp) ? json_parse(resp) : NULL; free(resp);
       int ok = v && !json_get(v, "error");
-      if (j->extra[0]) toast_set(ok ? j->extra : "Operazione non riuscita");
+      if (j->extra[0]) toast_set(ok ? j->extra : T("Operazione non riuscita"));
       if (j->id[0]) { if (!v) v = json_parse("{\"error\":\"x\"}");
         for (int w8 = 0; w8 < 60 && !quit_flag; w8++) { pthread_mutex_lock(&mu); int busy = pend_q != NULL; pthread_mutex_unlock(&mu); if (!busy) break; usleep(5000); }   // aspetta che l'app abbia letto il risultato precedente
         pthread_mutex_lock(&mu); json_free(pend_q); pend_q = v; snprintf(pend_q_tag, sizeof pend_q_tag, "%s", j->id); pthread_mutex_unlock(&mu); }
@@ -299,12 +314,12 @@ static void run_job(Job *j, const char *base) {
     }
     case J_EXPORT: {
       char *buf = NULL; size_t len = 0; url_enc(j->jid, e1, sizeof e1); snprintf(url, sizeof url, "%s/export/%s", base, e1);
-      if (http_get(url, &buf, &len)) { toast_set("Esportazione non riuscita"); break; }
+      if (http_get(url, &buf, &len)) { toast_set(T("Esportazione non riuscita")); break; }
       sceIoMkdir("ux0:data/whatsapp/export", 0777);
       char fn[300]; snprintf(fn, sizeof fn, "ux0:data/whatsapp/export/%s.txt", j->text);
       for (char *p = fn + 25; *p; p++) if (*p == '/' || *p == ':' || *p == '\\') *p = '_';
       SceUID f = sceIoOpen(fn, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
-      if (f >= 0) { size_t w = 0; while (w < len) { int r2 = sceIoWrite(f, buf + w, len - w); if (r2 <= 0) break; w += r2; } sceIoClose(f); toast_set("Chat salvata in ux0:data/whatsapp/export"); } else toast_set("Impossibile salvare");
+      if (f >= 0) { size_t w = 0; while (w < len) { int r2 = sceIoWrite(f, buf + w, len - w); if (r2 <= 0) break; w += r2; } sceIoClose(f); toast_set(T("Chat salvata in ux0:data/whatsapp/export")); } else toast_set(T("Impossibile salvare"));
       free(buf); break;
     }
     case J_READ: {
@@ -332,7 +347,7 @@ static void scan_bridge(void) {
     if (http_probe(url) == 0) {
       char base[64]; snprintf(base, sizeof base, "http://%d.%d.%d.%d:8787", a, b, c, i);
       pthread_mutex_lock(&mu); snprintf(base_url, sizeof base_url, "%s", base); pthread_mutex_unlock(&mu);
-      save_base_url(base); toast_set("Bridge trovato in rete"); break;
+      save_base_url(base); toast_set(T("Bridge trovato in rete")); break;
     }
   }
   scan_pct = -1;
@@ -485,13 +500,15 @@ static unsigned next_cp(const char **sp) {
   for (int i = 1; i < l; i++) { if ((s[i] & 0xC0) != 0x80) { *sp += i; return '?'; } cp = (cp << 6) | (s[i] & 63); }
   *sp += l; return cp;
 }
-static int cp_skip(unsigned cp) { return cp == 0xFE0F || cp == 0x200D || cp == 0x20E3 || (cp >= 0x1F3FB && cp <= 0x1F3FF) || (cp >= 0x1F1E6 && cp <= 0x1F1FF) || (cp >= 0xE0000 && cp <= 0xE007F) || (cp >= 0x2300 && cp < 0x10000); }
+// Con Roboto i simboli e gli ideogrammi (da U+2300 a U+FFFF) verrebbero disegnati come quadratini: si saltano. Con un font asiatico attivo (cjk_ok) si disegnano.
+static int is_cjk_cp(unsigned cp) { return (cp >= 0x2E80 && cp <= 0x9FFF) || (cp >= 0xAC00 && cp <= 0xD7AF) || (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFF00 && cp <= 0xFFEF); }
+static int cp_skip(unsigned cp) { return cp == 0xFE0F || cp == 0x200D || cp == 0x20E3 || (cp >= 0x1F3FB && cp <= 0x1F3FF) || (cp >= 0x1F1E6 && cp <= 0x1F1FF) || (cp >= 0xE0000 && cp <= 0xE007F) || (cp >= 0x2300 && cp < 0x10000 && !(cjk_ok && is_cjk_cp(cp))); }
 #define ESZ(size) ((int)((size) * 1.3f))
 
 // misura/disegna una stringa con emoji inline (sprite) e testo (Roboto)
 static int etext_impl(int draw, int x, int y, unsigned col, int size, const char *s) {
   int psize = quant_size(rnd(size * UK));        // dimensione reale del font in pixel (quantizzata)
-  vita2d_font *fnt = font_for(psize);
+  vita2d_font *fnt = font_override ? font_override : font_for(psize);
   char run[600]; int rl = 0; float cx = (float)x;               // cx in unita' logiche
   #define FLUSH_RUN() do { if (rl) { run[rl] = 0; if (draw) vita2d_font_draw_text(fnt, rnd(cx * UK), rnd((y + size) * UK), col, psize, run); cx += fw(fnt, psize, run) / UK; rl = 0; } } while (0)
   while (*s) {
@@ -720,7 +737,7 @@ static void apply_pending(void) {
         jv *o = c->items[i]; Chat *ch = &chats[nchats++];
         snprintf(ch->jid, sizeof ch->jid, "%s", json_str(o, "jid", ""));
         clean(json_str(o, "name", ch->jid), ch->name, sizeof ch->name);
-        clean(json_str(o, "last", ""), ch->last, sizeof ch->last);
+        clean(T(json_str(o, "last", "")), ch->last, sizeof ch->last);   // le anteprime generate dal bridge ("Foto", "Posizione"...) si traducono qui
         for (char *p = ch->last; *p; p++) if (*p == '\n') *p = ' ';
         ch->ts = (long)json_num(o, "ts", 0); ch->unread = (int)json_num(o, "unread", 0);
         ch->group = strstr(ch->jid, "@g.us") != NULL;
@@ -750,14 +767,14 @@ static void apply_pending(void) {
       for (int i = 0; i < m->count; i++) {
         jv *o = m->items[i]; Msg *x = &msgs[nmsgs++];
         snprintf(x->id, sizeof x->id, "%s", json_str(o, "id", ""));
-        char tmp[2100]; clean(json_str(o, "text", ""), tmp, sizeof tmp); x->text = strdup(tmp);
+        char tmp[2100]; clean(T(json_str(o, "text", "")), tmp, sizeof tmp); x->text = strdup(tmp);
         x->from_me = json_bool(o, "from_me", 0); x->ts = (long)json_num(o, "ts", 0); x->kind = kind_of(json_str(o, "kind", "text"));
         x->status = (int)json_num(o, "status", 0); x->edited = json_bool(o, "edited", 0);
         clean(json_str(o, "name", ""), x->name, sizeof x->name);
         x->mw0 = (int)json_num(o, "w", 0); x->mh0 = (int)json_num(o, "h", 0); x->dur = (int)json_num(o, "dur", 0);
         clean(json_str(o, "fname", ""), x->fname, sizeof x->fname); x->size = (long)json_num(o, "size", 0);
         jv *q = json_get(o, "quoted");
-        if (q && q->t == J_OBJ) { x->hasq = 1; clean(json_str(q, "text", ""), x->qtext, sizeof x->qtext); clean(json_str(q, "name", ""), x->qname, sizeof x->qname); }
+        if (q && q->t == J_OBJ) { x->hasq = 1; clean(T(json_str(q, "text", "")), x->qtext, sizeof x->qtext); clean(json_str(q, "name", ""), x->qname, sizeof x->qname); }
         jv *rs = json_get(o, "reactions");
         if (rs && rs->t == J_ARR) for (int k = 0; k < rs->count && x->nreact < 4; k++) { snprintf(x->react[x->nreact].e, 12, "%s", json_str(rs->items[k], "e", "")); x->react[x->nreact].n = (int)json_num(rs->items[k], "n", 1); x->nreact++; }
       }
@@ -778,7 +795,7 @@ static void fmt_time(long ts, char *o, size_t n, int list_mode) {
   long nowsec = (long)(tk.tick / 1000000ULL) - 62135596800L;
   long days_now = nowsec / 86400, days_msg = l / 86400;
   if (days_now == days_msg) snprintf(o, n, "%02d:%02d", a.tm_hour, a.tm_min);
-  else if (days_now - days_msg == 1) snprintf(o, n, "Ieri");
+  else if (days_now - days_msg == 1) snprintf(o, n, T("Ieri"));
   else snprintf(o, n, "%02d/%02d/%02d", a.tm_mday, a.tm_mon + 1, a.tm_year % 100);
 }
 static long now_unix(void) { SceDateTime now; sceRtcGetCurrentClockLocalTime(&now); SceRtcTick tk; sceRtcGetTick(&now, &tk); return (long)(tk.tick / 1000000ULL) - 62135596800L - tz_off; }
@@ -809,7 +826,7 @@ static void layout_msg(Msg *m, int maxbw, int showname) {
     if (m->mw < 120) { m->mh = m->mh * 120 / (m->mw ? m->mw : 1); m->mw = 120; }
     if (m->mh > 340) m->mh = 340;
   }
-  const char *src = m->kind == K_DELETED ? "\xF0\x9F\x9A\xAB Questo messaggio \xC3\xA8 stato eliminato" : m->text;
+  const char *src = m->kind == K_DELETED ? T("\xF0\x9F\x9A\xAB Questo messaggio \xC3\xA8 stato eliminato") : m->text;
   int wrapw = maxbw - 2 * PADX; if (has_media(m) && m->kind != K_STICKER) wrapw = m->mw > 180 ? m->mw : 180;
   const char *s = src; char cur[2200] = ""; int cap = 8; m->lines = malloc(sizeof(char *) * cap); m->nlines = 0;
   #define PUSHLINE(str) do { if (m->nlines == cap) { cap *= 2; m->lines = realloc(m->lines, sizeof(char *) * cap); } m->lines[m->nlines++] = strdup(str); } while (0)
@@ -837,7 +854,7 @@ static void layout_msg(Msg *m, int maxbw, int showname) {
   if (*src && (cur[0] || m->nlines == 0)) PUSHLINE(cur);
   int mw = 0; for (int i = 0; i < m->nlines; i++) { int w = tw(BFONT, m->lines[i]); if (w > mw) mw = w; }
   char tm[16]; fmt_time(m->ts, tm, sizeof tm, 0);
-  int tmw = tw(12, tm) + (m->from_me ? 24 : 0) + (m->edited ? tw(12, "Modificato ") : 0);
+  int tmw = tw(12, tm) + (m->from_me ? 24 : 0) + (m->edited ? tw(12, T("Modificato ")) : 0);
   int cw = mw;
   if (has_media(m) && m->mw > cw) cw = m->mw;
   if (m->hasq && cw < 200) cw = 200;
@@ -863,7 +880,7 @@ static void layout_msg(Msg *m, int maxbw, int showname) {
 // ======================================================================
 // pulsanti dichiarati durante il disegno e risolti a fine frame
 // ======================================================================
-enum { B_NONE, B_ROW, B_CHIP, B_PROFILE, B_BACK, B_MSG, B_EMOJI_BTN, B_SEND, B_ATTACH, B_DRAFT, B_EMO_CELL, B_EMO_BACK, B_EMO_CLOSE, B_MENU_REACT, B_MENU_ITEM, B_MENU_CLOSE, B_VIEW_CLOSE, B_PICK_ENTRY, B_PICK_UP, B_PREVIEW_SEND, B_PREVIEW_CAPTION, B_PREVIEW_CANCEL, B_PROF_NAME, B_PROF_ABOUT, B_PROF_PHOTO, B_CANCEL_REPLY, B_TAB, B_FAB, B_SEARCH_ICON, B_LISTMENU, B_CHATMENU, B_HEADER_INFO, B_POPUP_ITEM, B_POPUP_CLOSE, B_UNBLOCK_BAR, B_SEARCH_BOX, B_SEARCH_ROW, B_NC_GROUP, B_NC_CONTACT, B_NC_ROW, B_GR_SUBJECT, B_GR_ROW, B_GR_CREATE, B_CT_BLOCK, B_MEDIA_TAB, B_MEDIA_ITEM, B_DOC_ITEM, B_UPD_ROW, B_COMM_ROW, B_ST_PREV, B_ST_NEXT, B_LOGOUT, B_PLUGIN, B_PLUGIN_RM, B_BRIDGE_ADDR, B_THEME_UI, B_UPD_MY, B_STORY_NEW, B_FOLLOW_CH, B_ST_VIEWERS, B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT, B_NOTIF_TEST, B_PLUGIN_DIAG , B_CAM_OPEN, B_CAM_SHOT, B_CAM_FLIP, B_COMM_NEW, B_COMM_HEAD, B_UPD_CHECK, B_UPD_CANCEL, B_UPD_BLOCK};
+enum { B_NONE, B_ROW, B_CHIP, B_PROFILE, B_BACK, B_MSG, B_EMOJI_BTN, B_SEND, B_ATTACH, B_DRAFT, B_EMO_CELL, B_EMO_BACK, B_EMO_CLOSE, B_MENU_REACT, B_MENU_ITEM, B_MENU_CLOSE, B_VIEW_CLOSE, B_PICK_ENTRY, B_PICK_UP, B_PREVIEW_SEND, B_PREVIEW_CAPTION, B_PREVIEW_CANCEL, B_PROF_NAME, B_PROF_ABOUT, B_PROF_PHOTO, B_CANCEL_REPLY, B_TAB, B_FAB, B_SEARCH_ICON, B_LISTMENU, B_CHATMENU, B_HEADER_INFO, B_POPUP_ITEM, B_POPUP_CLOSE, B_UNBLOCK_BAR, B_SEARCH_BOX, B_SEARCH_ROW, B_NC_GROUP, B_NC_CONTACT, B_NC_ROW, B_GR_SUBJECT, B_GR_ROW, B_GR_CREATE, B_CT_BLOCK, B_MEDIA_TAB, B_MEDIA_ITEM, B_DOC_ITEM, B_UPD_ROW, B_COMM_ROW, B_ST_PREV, B_ST_NEXT, B_LOGOUT, B_PLUGIN, B_PLUGIN_RM, B_BRIDGE_ADDR, B_THEME_UI, B_UPD_MY, B_STORY_NEW, B_FOLLOW_CH, B_ST_VIEWERS, B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT, B_NOTIF_TEST, B_PLUGIN_DIAG , B_CAM_OPEN, B_CAM_SHOT, B_CAM_FLIP, B_COMM_NEW, B_COMM_HEAD, B_UPD_CHECK, B_UPD_CANCEL, B_UPD_BLOCK, B_LANG, B_LANG_ROW};
 typedef struct { int x, y, w, h, id, arg; } Btn;
 static Btn btns[400]; static int nb; static int clip_y0 = 0, clip_y1 = 100000;
 static void btn(int x, int y, int w, int h, int id, int arg) {
@@ -918,13 +935,13 @@ static void ime_open(int ctx, const char *title, const char *initial) {
   int r = -1;
   for (int v = 0; v < 3 && r < 0; v++) { r = ime_try(ctx, v); crumb("tastiera: tentativo %d ctx=%d -> 0x%x", v, ctx, (unsigned)r); }
   if (r >= 0) { ime_active = 1; ime_ctx = ctx; }
-  else { char m[80]; snprintf(m, sizeof m, "Tastiera non disponibile (errore 0x%x)", (unsigned)r); toast_set(m); }
+  else { char m[80]; snprintf(m, sizeof m, T("Tastiera non disponibile (errore 0x%x)"), (unsigned)r); toast_set(m); }
 }
 
 // ======================================================================
 // stato UI
 // ======================================================================
-enum { S_LOGIN, S_LIST, S_CHAT, S_PROFILE, S_PICKER, S_PREVIEW, S_UPDATES, S_COMM, S_CALLS, S_SEARCH, S_NEWCHAT, S_GROUP, S_CONTACT, S_MEDIA, S_STATUSVIEW, S_CAMERA };
+enum { S_LOGIN, S_LIST, S_CHAT, S_PROFILE, S_PICKER, S_PREVIEW, S_UPDATES, S_COMM, S_CALLS, S_SEARCH, S_NEWCHAT, S_GROUP, S_CONTACT, S_MEDIA, S_STATUSVIEW, S_CAMERA, S_LANG };
 // scala usata da ciascuna schermata: quelle con disposizione fissa (accesso, profilo, selettore file) restano piu' piccole
 static float screen_scale(int scr) {
   float k = ui_k;
@@ -1008,7 +1025,7 @@ static Msg *find_msg(const char *id) { for (int i = 0; i < nmsgs; i++) if (!strc
 
 static void send_draft(void) {
   if (!draft[0] || cur_chat < 0) return;
-  Job *j = job_new(J_SEND, chats[cur_chat].jid); if (!j) { toast_set("Coda piena, riprova"); return; }
+  Job *j = job_new(J_SEND, chats[cur_chat].jid); if (!j) { toast_set(T("Coda piena, riprova")); return; }
   snprintf(j->text, sizeof j->text, "%s", draft); snprintf(j->id, sizeof j->id, "%s", reply_id); snprintf(j->extra, sizeof j->extra, "%s", edit_id);
   job_commit();
   draft[0] = 0; reply_id[0] = 0; edit_id[0] = 0; chat_stick = 1; emoji_open = 0;
@@ -1049,11 +1066,12 @@ static void backspace_draft(void) { size_t l = strlen(draft); if (!l) return; l-
 int main(void) {
   { char d = '2'; SceUID sf = sceIoOpen("ux0:data/whatsapp/ui_scale.txt", SCE_O_RDONLY, 0); if (sf >= 0) { sceIoRead(sf, &d, 1); sceIoClose(sf); } ui_k = d == '0' ? 1.0f : d == '1' ? 1.5f : 2.0f; }   // predefinito: molto grande (2x)
   { char d = '0'; SceUID tf = sceIoOpen("ux0:data/whatsapp/theme_ui.txt", SCE_O_RDONLY, 0); if (tf >= 0) { sceIoRead(tf, &d, 1); sceIoClose(tf); } apply_ui_theme(d == '1'); }   // predefinito: chiaro
+  i18n_init();   // lingua scelta (o quella di sistema della Vita)
   upd_note("app: avvio (main)");   // primissima riga: se dopo un aggiornamento manca, l'app non e' nemmeno partita
   upd_init(); upd_note("app: versione letta, avvio la grafica");
   vita2d_init_advanced(8 * 1024 * 1024); vita2d_set_clear_color(C_BG);   // memoria temporanea per frame: 8 MB (di default 1 MB: con l'interfaccia ingrandita poteva finire)
   pool_total = vita2d_pool_free_space();
-  font = vita2d_load_font_file("app0:assets/Roboto-Regular.ttf"); for (int i = 0; i < 4; i++) fonts[i] = vita2d_load_font_file("app0:assets/Roboto-Regular.ttf");
+  load_fonts();
   crumb("vita2d e font ok");
   emoji_init();
   crumb("emoji ok");
@@ -1103,6 +1121,7 @@ int main(void) {
     #define FC(m) do { if (frame_no <= 2) crumb("frame %u: %s", frame_no, m); } while (0)
     FC("inizio");
     if (frame_no % 240 == 1) { SceUID hf = sceIoOpen("ur0:tai/wa_active.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (hf >= 0) { sceIoWrite(hf, "1", 1); sceIoClose(hf); } }
+    if (strcmp(font_wanted(), font_path_loaded)) { load_fonts(); ui_gen++; crumb("lingua: font cambiato (%s)", font_path_loaded); }
     apply_pending(); remap_cur_chat(); FC("apply_pending ok");
     extra_tick(); FC("extra_tick ok");
     pthread_mutex_lock(&mu);
@@ -1172,19 +1191,19 @@ int main(void) {
     vita2d_start_drawing(); vita2d_clear_screen(); FC("start_drawing ok");
 
     if (screen == S_LOGIN) {
-      textb(60, 70, C_TEXT, 34, "Usa WhatsApp su PS Vita");
-      const char *steps[] = { "1. Apri WhatsApp sul telefono", "2. Tocca Menu o Impostazioni > Dispositivi collegati", "3. Tocca Collega un dispositivo", "4. Inquadra il codice QR a destra" };
+      textb(60, 70, C_TEXT, 34, T("Usa WhatsApp su PS Vita"));
+      const char *steps[] = { T("1. Apri WhatsApp sul telefono"), T("2. Tocca Menu o Impostazioni > Dispositivi collegati"), T("3. Tocca Collega un dispositivo"), T("4. Inquadra il codice QR a destra") };
       for (int i = 0; i < 4; i++) text(60, 140 + i * 40, C_SUB, 21, steps[i]);
       if (!nok) {
-        text(60, 360, C_RED, 19, "Bridge non raggiungibile:"); text(60, 388, C_SUB, 19, base_url);
-        if (scan_pct >= 0) { char sc[80]; snprintf(sc, sizeof sc, "Cerco il bridge in rete... %d%%", scan_pct); text(60, 420, C_GREEN2, 17, sc); }
-        else text(60, 420, C_SUB, 15, "Avvia il bridge sul PC (porta 8787) e tieni Vita e PC sulla stessa rete.");
-        rrect(60, 456, 330, 46, 23, C_BAR); text(60 + (330 - tw(18, "Imposta indirizzo bridge")) / 2, 467, C_GREEN2, 18, "Imposta indirizzo bridge"); btn(60, 456, 330, 46, B_BRIDGE_ADDR, 0);
+        text(60, 360, C_RED, 19, T("Bridge non raggiungibile:")); text(60, 388, C_SUB, 19, base_url);
+        if (scan_pct >= 0) { char sc[80]; snprintf(sc, sizeof sc, T("Cerco il bridge in rete... %d%%"), scan_pct); text(60, 420, C_GREEN2, 17, sc); }
+        else text(60, 420, C_SUB, 15, T("Avvia il bridge sul PC (porta 8787) e tieni Vita e PC sulla stessa rete."));
+        rrect(60, 456, 330, 46, 23, C_BAR); text(60 + (330 - tw(18, T("Imposta indirizzo bridge"))) / 2, 467, C_GREEN2, 18, T("Imposta indirizzo bridge")); btn(60, 456, 330, 46, B_BRIDGE_ADDR, 0);
       }
       else if (!strcmp(st, "qr") && qr_tex) {
         rrect(553, 63, 354, 354, 18, C_DIV); rrect(560, 70, 340, 340, 14, C_WHITE);
         float s = 316.0f / vita2d_texture_get_width(qr_tex); vita2d_draw_texture_scale(qr_tex, 572, 82, s, s);
-      } else text(560, 220, C_SUB, 22, !strcmp(st, "loggedout") ? "Sessione terminata, riavvio..." : "Connessione a WhatsApp...");
+      } else text(560, 220, C_SUB, 22, !strcmp(st, "loggedout") ? T("Sessione terminata, riavvio...") : T("Connessione a WhatsApp..."));
     }
 
     if (screen == S_LIST) {
@@ -1216,27 +1235,27 @@ int main(void) {
       vita2d_disable_clipping(); clip_y0 = 0; clip_y1 = SH;
       CHROME_BEGIN();
       vita2d_draw_rectangle(0, 0, SW, HDR, C_BG);
-      textb(20, 14, C_GREEN2, 30, show_archived ? "Archiviate" : "WhatsApp");
+      textb(20, 14, C_GREEN2, 30, show_archived ? T("Archiviate") : "WhatsApp");
       draw_avatar(prof.jid[0] ? prof.jid : "me", prof.name, SW - 40, 30, 20); btn(SW - 70, 0, 70, HDR, B_PROFILE, 0);
       vita2d_draw_fill_circle(SW - 168, 28, 9, C_TEXT); vita2d_draw_fill_circle(SW - 168, 28, 7, C_BG); tline(SW - 162, 34, SW - 154, 42, C_TEXT); btn(SW - 195, 0, 55, HDR, B_SEARCH_ICON, 0);
       for (int d = 0; d < 3; d++) vita2d_draw_fill_circle(SW - 110, 20 + d * 10, 2.5f, C_TEXT); btn(SW - 135, 0, 55, HDR, B_LISTMENU, 0);
       vita2d_draw_rectangle(0, HDR, SW, CHIPS, C_BG);
-      const char *chn[] = { "Tutte", "Non lette", "Gruppi" }; int cx = 16;
+      const char *chn[] = { T("Tutte"), T("Non lette"), T("Gruppi") }; int cx = 16;
       for (int i = 0; i < 3; i++) {
         int w = tw(16, chn[i]) + 28; rrect(cx, HDR + 5, w, 34, 17, filter_sel == i ? C_CHIPSEL : C_CHIP);
         text(cx + 14, HDR + 11, filter_sel == i ? C_GREEN2 : C_SUB, 16, chn[i]); btn(cx, HDR, w, CHIPS, B_CHIP, i);
         cx += w + 8;
       }
-      if (nchats == 0) text(60, 260, C_SUB, 20, "Sincronizzazione chat...");
-      else if (nvis == 0) text(60, 260, C_SUB, 20, show_archived ? "Nessuna chat archiviata" : "Nessuna chat");
+      if (nchats == 0) text(60, 260, C_SUB, 20, T("Sincronizzazione chat..."));
+      else if (nvis == 0) text(60, 260, C_SUB, 20, show_archived ? T("Nessuna chat archiviata") : T("Nessuna chat"));
       vita2d_draw_fill_circle(SW - 50, SH - TABH - 46, 30, C_GREEN); vita2d_draw_rectangle(SW - 62, SH - TABH - 48, 24, 4, C_WHITE); vita2d_draw_rectangle(SW - 52, SH - TABH - 58, 4, 24, C_WHITE);
       btn(SW - 85, SH - TABH - 80, 70, 70, B_FAB, 0);
       if (sync_active) {
         int sy0 = SH - TABH - 34; vita2d_draw_rectangle(0, sy0, SW, 34, C_BAR);
         float frac = sync_pct / 100.0f; vita2d_draw_rectangle(0, sy0, SW, 4, C_DIV); vita2d_draw_rectangle(0, sy0, SW * frac + (sync_pct == 0 ? 40 : 0), 4, C_GREEN2);
         char sl[160]; unsigned el = (frame_no - sync_t0) / 60;
-        if (sync_pct >= 3) { unsigned eta = el * (100 - sync_pct) / sync_pct; snprintf(sl, sizeof sl, "Sincronizzazione: %d%% - %d chat - restano circa %u:%02u", sync_pct, sync_chats, eta / 60, eta % 60); }
-        else snprintf(sl, sizeof sl, "Sincronizzazione in corso... %d chat (trascorsi %u:%02u)", sync_chats, el / 60, el % 60);
+        if (sync_pct >= 3) { unsigned eta = el * (100 - sync_pct) / sync_pct; snprintf(sl, sizeof sl, T("Sincronizzazione: %d%% - %d chat - restano circa %u:%02u"), sync_pct, sync_chats, eta / 60, eta % 60); }
+        else snprintf(sl, sizeof sl, T("Sincronizzazione in corso... %d chat (trascorsi %u:%02u)"), sync_chats, el / 60, el % 60);
         text(16, sy0 + 9, C_TEXT, 15, sl);
       }
       draw_tabs();
@@ -1290,7 +1309,7 @@ int main(void) {
           if (has_media(m)) {
             Media *md = media_get(c->jid, m->id);
             if (md && md->tex) { float sx = (float)m->mw / vita2d_texture_get_width(md->tex), sy = (float)m->mh / vita2d_texture_get_height(md->tex); vita2d_draw_texture_scale(md->tex, cx0, cy, sx, sy); }
-            else { rrect(cx0, cy, m->mw, m->mh, 6, RGBA8(0, 0, 0, 90)); text((int)cx0 + m->mw / 2 - 30, (int)cy + m->mh / 2 - 10, C_SUB, 18, md && md->state == 2 ? "Errore" : "..."); }
+            else { rrect(cx0, cy, m->mw, m->mh, 6, RGBA8(0, 0, 0, 90)); text((int)cx0 + m->mw / 2 - 30, (int)cy + m->mh / 2 - 10, C_SUB, 18, md && md->state == 2 ? T("Errore") : "..."); }
             if (m->kind == K_VIDEO) { vita2d_draw_fill_circle(cx0 + m->mw / 2, cy + m->mh / 2, 26, RGBA8(0, 0, 0, 150)); text((int)cx0 + m->mw / 2 - 7, (int)cy + m->mh / 2 - 13, C_WHITE, 26, ">"); }
             btn((int)cx0, (int)cy, m->mw, m->mh, B_MSG, i + 1000);
             cy += m->mh + 4;
@@ -1299,7 +1318,7 @@ int main(void) {
             rrect(cx0, cy, m->w - 2 * pad, HDOC, 8, C_QUOTE);
             rrect(cx0 + 8, cy + 8, 34, 40, 5, C_RED); text((int)cx0 + 12, (int)cy + 20, C_WHITE, 14, "DOC");
             char fn[160]; fit(m->fname, m->w - 2 * pad - 70, 16, fn, sizeof fn); text((int)cx0 + 52, (int)cy + 8, C_TEXT, 16, fn);
-            char sz[60]; snprintf(sz, sizeof sz, "%.1f KB - tocca per scaricare", m->size / 1024.0); text((int)cx0 + 52, (int)cy + 30, C_SUB, 13, sz);
+            char sz[60]; snprintf(sz, sizeof sz, T("%.1f KB - tocca per scaricare"), m->size / 1024.0); text((int)cx0 + 52, (int)cy + 30, C_SUB, 13, sz);
             btn((int)cx0, (int)cy, m->w - 2 * pad, HDOC, B_MSG, i + 1000); cy += HDOC + 4;
           }
           if (m->kind == K_VOICE || m->kind == K_AUDIO) {
@@ -1311,12 +1330,12 @@ int main(void) {
           // ora + spunte
           char tm[16]; fmt_time(m->ts, tm, sizeof tm, 0);
           int overlay = has_media(m) && m->nlines == 0;
-          int rw = tw(12, tm) + (m->from_me ? 24 : 0); int ew = m->edited ? tw(12, "Modificato ") : 0;
+          int rw = tw(12, tm) + (m->from_me ? 24 : 0); int ew = m->edited ? tw(12, T("Modificato ")) : 0;
           float tx = bx + m->w - pad - 4 - rw - ew, ty = y + m->h - 20;
           if (sticker) { tx = bx + m->w - rw - 4 - ew; ty = y + m->h - 17; }
           if (overlay && !sticker) rrect(tx - 6, ty - 2, rw + ew + 10, 18, 9, RGBA8(40, 40, 40, 255));
           unsigned tcol = overlay && !sticker ? C_WHITE : C_SUB;
-          if (m->edited) text((int)tx, (int)ty, tcol, 12, "Modificato");
+          if (m->edited) text((int)tx, (int)ty, tcol, 12, T("Modificato"));
           text((int)tx + ew, (int)ty, tcol, 12, tm);
           if (m->from_me) { unsigned kc = m->status >= 4 ? C_BLUE : tcol; check(tx + ew + tw(12, tm) + 6, ty + 3, kc, m->status >= 3); }
           if (m->nreact) {
@@ -1330,7 +1349,7 @@ int main(void) {
         y += slot + 6;
       }
       vita2d_disable_clipping(); clip_y0 = 0; clip_y1 = SH;
-      if (!fresh) text(SW / 2 - 60, 260, C_SUB, 18, "Caricamento...");
+      if (!fresh) text(SW / 2 - 60, 260, C_SUB, 18, T("Caricamento..."));
       // header (barra fissa)
       CHROME_BEGIN();
       vita2d_draw_rectangle(0, 0, SW, HDR, C_BAR);
@@ -1338,14 +1357,14 @@ int main(void) {
       draw_avatar(c->jid, c->name, 86, 30, 20);
       char nm[200]; fit(c->name, SW - 210, 21, nm, sizeof nm); textb(120, 8, C_TEXT, 21, nm); btn(70, 0, SW - 150, HDR, B_HEADER_INFO, 0);
       for (int d = 0; d < 3; d++) vita2d_draw_fill_circle(SW - 36, 20 + d * 10, 2.5f, C_TEXT); btn(SW - 75, 0, 75, HDR, B_CHATMENU, 0);
-      const char *sub = !strcmp(pst, "composing") ? "sta scrivendo..." : !strcmp(pst, "recording") ? "sta registrando un audio..." : !strcmp(pst, "available") ? "online" : "";
+      const char *sub = !strcmp(pst, "composing") ? T("sta scrivendo...") : !strcmp(pst, "recording") ? T("sta registrando un audio...") : !strcmp(pst, "available") ? "online" : "";
       if (sub[0]) text(120, 34, C_GREEN2, 14, sub);
       // reply/edit banner
       int by = SH - BARH - extra_bar_c - (emoji_open ? EMO_PANEL : 0);
       if (extra_bar_c) {
         vita2d_draw_rectangle(0, by, SW, extra_bar_c, C_BAR);
         vita2d_draw_rectangle(14, by + 6, 4, 34, edit_id[0] ? C_GREEN2 : C_BLUE);
-        text(28, by + 5, edit_id[0] ? C_GREEN2 : C_BLUE, 14, edit_id[0] ? "Modifica messaggio" : (reply_name[0] ? reply_name : "Risposta"));
+        text(28, by + 5, edit_id[0] ? C_GREEN2 : C_BLUE, 14, edit_id[0] ? T("Modifica messaggio") : (reply_name[0] ? reply_name : T("Risposta")));
         if (!edit_id[0]) { char rt[200]; fit(reply_text, SW - 140, 15, rt, sizeof rt); text(28, by + 24, C_SUB, 15, rt); }
         text(SW - 44, by + 8, C_SUB, 24, "x"); btn(SW - 70, by, 70, extra_bar_c, B_CANCEL_REPLY, 0);
       }
@@ -1353,7 +1372,7 @@ int main(void) {
       if (emoji_open) {
         int py = SH - BARH - EMO_PANEL;
         vita2d_draw_rectangle(0, py, SW, EMO_PANEL, C_BAR);
-        text(24, py + 8, C_SUB, 16, "Emoji"); rrect(SW - 160, py + 4, 70, 32, 8, C_CHIP); text(SW - 142, py + 9, C_TEXT, 18, "<x"); btn(SW - 160, py, 70, 40, B_EMO_BACK, 0);
+        text(24, py + 8, C_SUB, 16, T("Emoji")); rrect(SW - 160, py + 4, 70, 32, 8, C_CHIP); text(SW - 142, py + 9, C_TEXT, 18, "<x"); btn(SW - 160, py, 70, 40, B_EMO_BACK, 0);
         rrect(SW - 80, py + 4, 70, 32, 8, C_CHIP); text(SW - 66, py + 9, C_TEXT, 18, "ABC"); btn(SW - 80, py, 80, 40, B_EMO_CLOSE, 0);
         int cell = 56, cols = (SW - 40) / cell; if (cols < 4) cols = 4; int rows = (emo_n + cols - 1) / cols; float gmax = rows * cell - (EMO_PANEL - 40); if (gmax < 0) gmax = 0;
         if (emo_scroll < 0) { emo_scroll = 0; emo_vel = 0; } if (emo_scroll > gmax) { emo_scroll = gmax; emo_vel = 0; }
@@ -1384,12 +1403,12 @@ int main(void) {
         if (tw(19, tail) <= SW - 290) snprintf(shown, sizeof shown, "%s", tail);
         else { const char *p = tail + strlen(tail); while (p > tail) { const char *q = p - 1; while (q > tail && (*q & 0xC0) == 0x80) q--; if (tw(19, q) > SW - 290) break; p = q; } snprintf(shown, sizeof shown, "%s", p); }
         text(84, iy + 21, C_TEXT, 19, shown);
-      } else text(84, iy + 21, C_SUB, 19, "Scrivi un messaggio");
+      } else text(84, iy + 21, C_SUB, 19, T("Scrivi un messaggio"));
       btn(76, iy, SW - 76 - 180, BARH, B_DRAFT, 0);
       vita2d_draw_fill_circle(SW - 40, iy + 32, 26, draft[0] ? C_GREEN : C_BAR); send_arrow(SW - 40, iy + 32);
       btn(SW - 70, iy, 70, BARH, B_SEND, 0);
-      if (c->channel) { vita2d_draw_rectangle(0, iy, SW, BARH, C_BAR); text((SW - tw(18, "Canale: sola lettura")) / 2, iy + 22, C_SUB, 18, "Canale: sola lettura"); btn(0, iy, SW, BARH, B_NONE, 0); }
-      else if (c->blocked) { vita2d_draw_rectangle(0, iy, SW, BARH, C_BAR); text((SW - tw(18, "Hai bloccato questo contatto. Tocca per sbloccare.")) / 2, iy + 22, C_SUB, 18, "Hai bloccato questo contatto. Tocca per sbloccare."); btn(0, iy, SW, BARH, B_UNBLOCK_BAR, 0); }
+      if (c->channel) { vita2d_draw_rectangle(0, iy, SW, BARH, C_BAR); text((SW - tw(18, T("Canale: sola lettura"))) / 2, iy + 22, C_SUB, 18, T("Canale: sola lettura")); btn(0, iy, SW, BARH, B_NONE, 0); }
+      else if (c->blocked) { vita2d_draw_rectangle(0, iy, SW, BARH, C_BAR); text((SW - tw(18, T("Hai bloccato questo contatto. Tocca per sbloccare."))) / 2, iy + 22, C_SUB, 18, T("Hai bloccato questo contatto. Tocca per sbloccare.")); btn(0, iy, SW, BARH, B_UNBLOCK_BAR, 0); }
 
       CHROME_END();
       if (menu_open && !viewer_open) {
@@ -1401,10 +1420,10 @@ int main(void) {
           int mw = 380, mx = (SW - mw) / 2;
           int own_text = mm->from_me && mm->kind == K_TEXT && now_unix() - mm->ts < 15 * 60;
           const char *items[7]; int ids[7]; int ni = 0;
-          items[ni] = "Rispondi"; ids[ni++] = 0; items[ni] = "Copia nella bozza"; ids[ni++] = 1;
-          if (own_text) { items[ni] = "Modifica"; ids[ni++] = 2; }
-          if (mm->from_me && mm->kind != K_DELETED) { items[ni] = "Elimina per tutti"; ids[ni++] = 3; }
-          items[ni] = "Elimina per me"; ids[ni++] = 4;
+          items[ni] = T("Rispondi"); ids[ni++] = 0; items[ni] = T("Copia nella bozza"); ids[ni++] = 1;
+          if (own_text) { items[ni] = T("Modifica"); ids[ni++] = 2; }
+          if (mm->from_me && mm->kind != K_DELETED) { items[ni] = T("Elimina per tutti"); ids[ni++] = 3; }
+          items[ni] = T("Elimina per me"); ids[ni++] = 4;
           int mh = 70 + ni * 50, my = (SH - mh) / 2;
           rrect(mx, my, mw, mh, 14, C_BAR); btn(mx, my, mw, mh, B_NONE, 0);
           for (int k = 0; k < 6; k++) { int ex = mx + 20 + k * 58; emoji_cp(QUICK[k], ex, my + 14, 32); btn(ex - 6, my + 8, 56, 52, B_MENU_REACT, k); }
@@ -1416,38 +1435,39 @@ int main(void) {
 
     if (screen == S_PROFILE) {
       vita2d_draw_rectangle(0, 0, SW, 60, C_BAR); back_arrow(); btn(0, 0, 70, 60, B_BACK, 0);
-      textb(70, 14, C_TEXT, 26, "Profilo");
+      textb(70, 14, C_TEXT, 26, T("Profilo"));
       draw_avatar(prof.jid[0] ? prof.jid : "me", prof.name, 200, 250, 90);
       vita2d_draw_fill_circle(280, 330, 24, C_GREEN); text(271, 312, C_WHITE, 30, "+"); btn(100, 160, 200, 200, B_PROF_PHOTO, 0);
-      text(110, 372, C_SUB, 14, "Tocca per cambiare foto");
-      struct { const char *lab; const char *val; int id; } rows[3] = { { "Nome", prof.name, B_PROF_NAME }, { "Info", prof.about, B_PROF_ABOUT }, { "Telefono", prof.phone, B_NONE } };
+      text(110, 372, C_SUB, 14, T("Tocca per cambiare foto"));
+      struct { const char *lab; const char *val; int id; } rows[3] = { { T("Nome"), prof.name, B_PROF_NAME }, { T("Info"), prof.about, B_PROF_ABOUT }, { T("Telefono"), prof.phone, B_NONE } };
       for (int i = 0; i < 3; i++) {
         int ry = 100 + i * 110; text(380, ry, C_SUB, 16, rows[i].lab);
-        char v[300]; fit(rows[i].val[0] ? rows[i].val : (rows[i].id == B_PROF_ABOUT ? "(vuota)" : "-"), 480, 22, v, sizeof v); text(380, ry + 26, C_TEXT, 22, v);
-        if (rows[i].id != B_NONE) { text(SW - 100, ry + 14, C_GREEN2, 16, "Modifica"); btn(360, ry - 10, SW - 380, 90, rows[i].id, 0); }
+        char v[300]; fit(rows[i].val[0] ? rows[i].val : (rows[i].id == B_PROF_ABOUT ? T("(vuota)") : "-"), 480, 22, v, sizeof v); text(380, ry + 26, C_TEXT, 22, v);
+        if (rows[i].id != B_NONE) { text(SW - 100, ry + 14, C_GREEN2, 16, T("Modifica")); btn(360, ry - 10, SW - 380, 90, rows[i].id, 0); }
         vita2d_draw_rectangle(380, ry + 70, SW - 420, 1, C_DIV);
       }
-      if (!prof.ok) text(380, 440, C_SUB, 16, "Caricamento profilo...");
-      { UpdInfo ui_; upd_snapshot(&ui_); char vt[96]; snprintf(vt, sizeof vt, "Versione %s", ui_.current);
-        rrect(100, 400, 250, 48, 24, C_BAR); text(100 + (250 - tw(17, "Controlla aggiornamenti")) / 2, 413, C_GREEN2, 17, "Controlla aggiornamenti"); btn(100, 400, 250, 48, B_UPD_CHECK, 0);
-        text(100 + (250 - tw(14, vt)) / 2, 455, C_SUB, 14, vt); }
-      rrect(380, 400, 240, 48, 24, C_BAR); text(380 + (240 - tw(19, "Disconnetti")) / 2, 412, C_RED, 19, "Disconnetti"); btn(380, 400, 240, 48, B_LOGOUT, 0);
+      if (!prof.ok) text(380, 440, C_SUB, 16, T("Caricamento profilo..."));
+      { UpdInfo ui_; upd_snapshot(&ui_); char vt[96]; snprintf(vt, sizeof vt, T("Versione %s"), ui_.current);
+        rrect(100, 400, 250, 48, 24, C_BAR); text(100 + (250 - tw(17, T("Controlla aggiornamenti"))) / 2, 413, C_GREEN2, 17, T("Controlla aggiornamenti")); btn(100, 400, 250, 48, B_UPD_CHECK, 0);
+        text(100 + (250 - tw(14, vt)) / 2, 455, C_SUB, 14, vt);
+        char lt[128]; snprintf(lt, sizeof lt, T("Lingua: %s"), i18n_native_name(i18n_lang())); rrect(100, 482, 250, 40, 20, C_BAR); text(100 + (250 - tw(16, lt)) / 2, 492, C_TEXT, 16, lt); btn(100, 482, 250, 40, B_LANG, 0); }
+      rrect(380, 400, 240, 48, 24, C_BAR); text(380 + (240 - tw(19, T("Disconnetti"))) / 2, 412, C_RED, 19, T("Disconnetti")); btn(380, 400, 240, 48, B_LOGOUT, 0);
       if (plugin_cache < 0 || frame_no % 120 == 0) plugin_cache = plugin_installed();
-      const char *nl = !plugin_cache ? "Installa notifiche" : notif_enabled() ? "Notifiche: attive" : "Notifiche: disattivate";
+      const char *nl = !plugin_cache ? T("Installa notifiche") : notif_enabled() ? T("Notifiche: attive") : T("Notifiche: disattivate");
       rrect(640, 400, 280, 48, 24, C_BAR); text(640 + (280 - tw(19, nl)) / 2, 412, plugin_cache && notif_enabled() ? C_GREEN2 : C_SUB, 19, nl); btn(640, 400, 280, 48, B_PLUGIN, 0);
-      { const char *tl = ui_dark ? "Tema: scuro" : "Tema: chiaro"; rrect(380, 458, 240, 40, 20, C_BAR); text(380 + (240 - tw(16, tl)) / 2, 468, C_TEXT, 16, tl); btn(380, 458, 240, 40, B_THEME_UI, 0); }
+      { const char *tl = ui_dark ? T("Tema: scuro") : T("Tema: chiaro"); rrect(380, 458, 240, 40, 20, C_BAR); text(380 + (240 - tw(16, tl)) / 2, 468, C_TEXT, 16, tl); btn(380, 458, 240, 40, B_THEME_UI, 0); }
       { // stato del plugin: attivo se ha aggiornato il suo file da meno di 40 secondi
         int al = alive_state();
-        const char *st = !plugin_cache ? "Plugin notifiche: non installato" : al == 1 ? "Plugin notifiche: ATTIVO" : al < 0 ? "Plugin notifiche: verifica in corso..." : "Plugin notifiche: installato ma non attivo (riavvia la Vita)";
+        const char *st = !plugin_cache ? T("Plugin notifiche: non installato") : al == 1 ? T("Plugin notifiche: ATTIVO") : al < 0 ? T("Plugin notifiche: verifica in corso...") : T("Plugin notifiche: installato ma non attivo (riavvia la Vita)");
         text(380, 504, (al == 1 && plugin_cache) ? C_GREEN2 : C_SUB, 14, st); btn(380, 498, 250, 32, B_PLUGIN_DIAG, 0);   // toccando la riga: diagnostica
-        rrect(640, 498, 280, 32, 16, C_BAR); text(640 + (280 - tw(15, "Prova notifica")) / 2, 505, C_TEXT, 15, "Prova notifica"); btn(640, 498, 280, 32, B_NOTIF_TEST, 0); }
-      if (plugin_cache) { rrect(640, 458, 280, 40, 20, C_BAR); text(640 + (280 - tw(16, "Rimuovi plugin notifiche")) / 2, 468, C_RED, 16, "Rimuovi plugin notifiche"); btn(640, 458, 280, 40, B_PLUGIN_RM, 0); }
+        rrect(640, 498, 280, 32, 16, C_BAR); text(640 + (280 - tw(15, T("Prova notifica"))) / 2, 505, C_TEXT, 15, T("Prova notifica")); btn(640, 498, 280, 32, B_NOTIF_TEST, 0); }
+      if (plugin_cache) { rrect(640, 458, 280, 40, 20, C_BAR); text(640 + (280 - tw(16, T("Rimuovi plugin notifiche"))) / 2, 468, C_RED, 16, T("Rimuovi plugin notifiche")); btn(640, 458, 280, 40, B_PLUGIN_RM, 0); }
     }
 
     if (screen == S_PICKER) {
       vita2d_draw_rectangle(0, 0, SW, 60, C_BAR); back_arrow(); btn(0, 0, 70, 60, B_BACK, 0);
-      char hd[300]; fit(pick_dir[0] ? pick_dir : (pick_mode == 1 ? "Scegli una foto" : "Scegli un file"), 640, 22, hd, sizeof hd); textb(70, 16, C_TEXT, 22, hd);
-      rrect(SW - 190, 8, 174, 44, 22, C_GREEN2); text(SW - 190 + (174 - tw(18, "Fotocamera")) / 2, 20, C_WHITE, 18, "Fotocamera"); btn(SW - 190, 8, 174, 44, B_CAM_OPEN, 0);
+      char hd[300]; fit(pick_dir[0] ? pick_dir : (pick_mode == 1 ? T("Scegli una foto") : T("Scegli un file")), 640, 22, hd, sizeof hd); textb(70, 16, C_TEXT, 22, hd);
+      rrect(SW - 190, 8, 174, 44, 22, C_GREEN2); text(SW - 190 + (174 - tw(18, T("Fotocamera"))) / 2, 20, C_WHITE, 18, T("Fotocamera")); btn(SW - 190, 8, 174, 44, B_CAM_OPEN, 0);
       float viewh = SH - 60; float total = (nents + (pick_dir[0] ? 1 : 0)) * 52.0f; float maxs = total > viewh ? total - viewh : 0;
       if (pick_scroll < 0) { pick_scroll = 0; pick_vel = 0; } if (pick_scroll > maxs) { pick_scroll = maxs; pick_vel = 0; }
       vita2d_enable_clipping(); vita2d_set_clip_rectangle(0, 60, SW, SH); clip_y0 = 60;
@@ -1468,11 +1488,11 @@ int main(void) {
       if (prev_tex) { float w0 = vita2d_texture_get_width(prev_tex), h0 = vita2d_texture_get_height(prev_tex); float s = fminf((SW - 40) / w0, (SH - (pick_mode == 1 ? 150 : 200)) / h0); float ix = (SW - w0 * s) / 2, iy2 = 70 + (SH - (pick_mode == 1 ? 150 : 200) - h0 * s) / 2; vita2d_draw_texture_scale(prev_tex, ix, iy2, s, s);
         if (pick_mode == 1) { float side = fminf(w0, h0) * s, cx0 = ix + (w0 * s - side) / 2, cy0 = iy2 + (h0 * s - side) / 2; unsigned fc = RGBA8(0x25, 0xD3, 0x66, 255);
           vita2d_draw_rectangle(cx0, cy0, side, 3, fc); vita2d_draw_rectangle(cx0, cy0 + side - 3, side, 3, fc); vita2d_draw_rectangle(cx0, cy0, 3, side, fc); vita2d_draw_rectangle(cx0 + side - 3, cy0, 3, side, fc);
-          text(SW / 2 - tw(15, "La foto verra' ritagliata nel riquadro verde (quadrata, al centro)") / 2, SH - 78, C_SUB, 15, "La foto verra' ritagliata nel riquadro verde (quadrata, al centro)"); } }
+          text(SW / 2 - tw(15, T("La foto verra' ritagliata nel riquadro verde (quadrata, al centro)")) / 2, SH - 78, C_SUB, 15, T("La foto verra' ritagliata nel riquadro verde (quadrata, al centro)")); } }
       else { rrect(SW / 2 - 60, 160, 120, 150, 10, C_BAR); text(SW / 2 - 30, 215, C_SUB, 28, strcmp(sel_kind, "doc") ? sel_kind : "DOC"); }
       if (pick_mode != 1) {
         rrect(14, SH - 64, SW - 100, 48, 24, C_BAR);
-        char cp[300]; fit(caption[0] ? caption : "Aggiungi una didascalia...", SW - 160, 19, cp, sizeof cp); text(36, SH - 50, caption[0] ? C_TEXT : C_SUB, 19, cp); btn(14, SH - 64, SW - 100, 56, B_PREVIEW_CAPTION, 0);
+        char cp[300]; fit(caption[0] ? caption : T("Aggiungi una didascalia..."), SW - 160, 19, cp, sizeof cp); text(36, SH - 50, caption[0] ? C_TEXT : C_SUB, 19, cp); btn(14, SH - 64, SW - 100, 56, B_PREVIEW_CAPTION, 0);
       }
       vita2d_draw_fill_circle(SW - 40, SH - 40, 26, C_GREEN); send_arrow(SW - 40, SH - 40);
       btn(SW - 70, SH - 64, 70, 60, B_PREVIEW_SEND, 0);
@@ -1483,7 +1503,15 @@ int main(void) {
 
     if (toast_frames > 0) { toast_frames--; int w = tw(17, toast_show) + 40; rrect((SW - w) / 2, SH - 120, w, 40, 20, RGBA8(0x30, 0x3C, 0x44, 245)); text((SW - w) / 2 + 20, SH - 111, C_TEXT, 17, toast_show); }
     { unsigned fs = vita2d_pool_free_space(); unsigned used = pool_total > fs ? pool_total - fs : 0; if (used > pool_max_used) { if (used > pool_max_used + pool_max_used / 4 + 20000) crumb("gpu: memoria temporanea usata %u KB di %u KB", used / 1024, pool_total / 1024); pool_max_used = used; } }
-    vita2d_end_drawing(); FC("end_drawing ok"); vita2d_common_dialog_update(); FC("dialog_update ok"); vita2d_swap_buffers(); FC("swap ok");
+    vita2d_end_drawing(); FC("end_drawing ok");
+    {   // solo per i test: se esiste ux0:data/whatsapp/shot_at.txt (numero di frame), a quel frame salva lo schermo in shot.ppm
+      static int shot_frame = -1; if (shot_frame < 0) { char b[16] = ""; SceUID sf = sceIoOpen("ux0:data/whatsapp/shot_at.txt", SCE_O_RDONLY, 0); if (sf >= 0) { int n = sceIoRead(sf, b, 15); sceIoClose(sf); b[n > 0 ? n : 0] = 0; } shot_frame = atoi(b); }
+      if (shot_frame > 0 && (int)frame_no == shot_frame) {
+        vita2d_wait_rendering_done(); const unsigned char *fb = vita2d_get_current_fb(); SceUID of = sceIoOpen("ux0:data/whatsapp/shot.ppm", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+        if (fb && of >= 0) { sceIoWrite(of, "P6\n960 544\n255\n", 15); static unsigned char row[960 * 3]; for (int y = 0; y < 544; y++) { for (int x = 0; x < 960; x++) { const unsigned char *p = fb + ((size_t)y * 960 + x) * 4; row[x * 3] = p[0]; row[x * 3 + 1] = p[1]; row[x * 3 + 2] = p[2]; } sceIoWrite(of, row, sizeof row); } crumb("schermo salvato in shot.ppm (frame %d)", (int)frame_no); }
+        if (of >= 0) sceIoClose(of);
+      } }
+    vita2d_common_dialog_update(); FC("dialog_update ok"); vita2d_swap_buffers(); FC("swap ok");
 
     { static int last_screen = -1; if (screen != last_screen) { crumb("schermata %d", screen);
         if (last_screen == S_CHAT && screen == S_LIST && cur_chat >= 0) for (int v = 0; v < nvis; v++) if (visible_idx[v] == cur_chat) { list_sel = v; list_sel_dirty = 1; break; }
@@ -1504,10 +1532,10 @@ int main(void) {
       case B_MENU_CLOSE: menu_open = 0; break;
       case B_MENU_REACT: { Msg *m = find_msg(menu_id); if (m && cur_chat >= 0) { Job *j = job_new(J_REACT, chats[cur_chat].jid); if (j) { snprintf(j->id, sizeof j->id, "%s", m->id); char tmp[16] = ""; append_cp(tmp, sizeof tmp, QUICK[arg]); snprintf(j->text, sizeof j->text, "%s", tmp); job_commit(); } } menu_open = 0; break; }
       case B_MENU_ITEM: { Msg *m = find_msg(menu_id); if (m && cur_chat >= 0) {
-          if (arg == 0) { snprintf(reply_id, sizeof reply_id, "%s", m->id); edit_id[0] = 0; snprintf(reply_name, sizeof reply_name, "%s", m->from_me ? "Tu" : (m->name[0] ? m->name : chats[cur_chat].name)); char t[200]; if (m->kind == K_TEXT) snprintf(t, sizeof t, "%s", m->text); else snprintf(t, sizeof t, "%s", m->kind == K_IMAGE ? "Foto" : m->kind == K_VIDEO ? "Video" : m->kind == K_DOC ? m->fname : m->kind == K_STICKER ? "Sticker" : "Audio"); snprintf(reply_text, sizeof reply_text, "%s", t); for (char *p = reply_text; *p; p++) if (*p == '\n') *p = ' '; }
+          if (arg == 0) { snprintf(reply_id, sizeof reply_id, "%s", m->id); edit_id[0] = 0; snprintf(reply_name, sizeof reply_name, "%s", m->from_me ? T("Tu") : (m->name[0] ? m->name : chats[cur_chat].name)); char t[200]; if (m->kind == K_TEXT) snprintf(t, sizeof t, "%s", m->text); else snprintf(t, sizeof t, "%s", m->kind == K_IMAGE ? T("Foto") : m->kind == K_VIDEO ? T("Video") : m->kind == K_DOC ? m->fname : m->kind == K_STICKER ? T("Sticker") : T("Audio")); snprintf(reply_text, sizeof reply_text, "%s", t); for (char *p = reply_text; *p; p++) if (*p == '\n') *p = ' '; }
           else if (arg == 1) { size_t l = strlen(draft); snprintf(draft + l, sizeof draft - l, "%s", m->text); }
           else if (arg == 2) { snprintf(edit_id, sizeof edit_id, "%s", m->id); reply_id[0] = 0; snprintf(draft, sizeof draft, "%s", m->text); }
-          else if (arg == 4) { char b[300]; snprintf(b, sizeof b, "{\"jid\":\"%s\",\"id\":\"%s\"}", chats[cur_chat].jid, m->id); fire("/deleteforme", b, "Messaggio eliminato"); }
+          else if (arg == 4) { char b[300]; snprintf(b, sizeof b, "{\"jid\":\"%s\",\"id\":\"%s\"}", chats[cur_chat].jid, m->id); fire("/deleteforme", b, T("Messaggio eliminato")); }
           else if (arg == 3) { Job *j = job_new(J_DELETE, chats[cur_chat].jid); if (j) { snprintf(j->id, sizeof j->id, "%s", m->id); job_commit(); } }
         } menu_open = 0; break; }
       case B_CANCEL_REPLY: if (edit_id[0]) draft[0] = 0; reply_id[0] = 0; edit_id[0] = 0; break;
@@ -1515,7 +1543,7 @@ int main(void) {
       case B_EMO_CLOSE: emoji_open = 0; break;
       case B_EMO_BACK: backspace_draft(); break;
       case B_EMO_CELL: if (arg >= 0 && arg < emo_n) append_cp(draft, sizeof draft, emo_cp[arg]); break;
-      case B_DRAFT: ime_open(IME_DRAFT, "Scrivi un messaggio", draft); break;
+      case B_DRAFT: ime_open(IME_DRAFT, T("Scrivi un messaggio"), draft); break;
       case B_SEND: send_draft(); break;
       case B_ATTACH: pick_mode = 0; screen = S_PICKER; pick_load(""); break;
       case B_PICK_UP: pick_up(); break;
@@ -1530,14 +1558,14 @@ int main(void) {
           screen = S_PREVIEW;
         }
         break; }
-      case B_PREVIEW_CAPTION: ime_open(IME_CAPTION, "Didascalia", caption); break;
+      case B_PREVIEW_CAPTION: ime_open(IME_CAPTION, T("Didascalia"), caption); break;
       case B_PREVIEW_CANCEL: screen = S_PICKER; break;
       case B_PREVIEW_SEND:
-        if (pick_mode == 2) { Job *j = job_new(J_MEDIA, ""); if (j) { snprintf(j->path, sizeof j->path, "%s", sel_path); snprintf(j->kind, sizeof j->kind, "status"); snprintf(j->text, sizeof j->text, "%s", caption); job_commit(); toast_set("Pubblico la storia..."); refresh_my_at = frame_no + 300; } screen = S_UPDATES; }
-        else if (pick_mode == 1) { Job *j = job_new(J_PHOTO, prof.jid); if (j) { snprintf(j->path, sizeof j->path, "%s", sel_path); job_commit(); toast_set("Caricamento foto..."); } screen = S_PROFILE; }
-        else if (cur_chat >= 0) { Job *j = job_new(J_MEDIA, chats[cur_chat].jid); if (j) { snprintf(j->path, sizeof j->path, "%s", sel_path); snprintf(j->kind, sizeof j->kind, "%s", sel_kind); snprintf(j->text, sizeof j->text, "%s", caption); snprintf(j->id, sizeof j->id, "%s", reply_id); job_commit(); toast_set("Invio allegato..."); reply_id[0] = 0; chat_stick = 1; } screen = S_CHAT; }
+        if (pick_mode == 2) { Job *j = job_new(J_MEDIA, ""); if (j) { snprintf(j->path, sizeof j->path, "%s", sel_path); snprintf(j->kind, sizeof j->kind, "status"); snprintf(j->text, sizeof j->text, "%s", caption); job_commit(); toast_set(T("Pubblico la storia...")); refresh_my_at = frame_no + 300; } screen = S_UPDATES; }
+        else if (pick_mode == 1) { Job *j = job_new(J_PHOTO, prof.jid); if (j) { snprintf(j->path, sizeof j->path, "%s", sel_path); job_commit(); toast_set(T("Caricamento foto...")); } screen = S_PROFILE; }
+        else if (cur_chat >= 0) { Job *j = job_new(J_MEDIA, chats[cur_chat].jid); if (j) { snprintf(j->path, sizeof j->path, "%s", sel_path); snprintf(j->kind, sizeof j->kind, "%s", sel_kind); snprintf(j->text, sizeof j->text, "%s", caption); snprintf(j->id, sizeof j->id, "%s", reply_id); job_commit(); toast_set(T("Invio allegato...")); reply_id[0] = 0; chat_stick = 1; } screen = S_CHAT; }
         break;
-      case B_PROF_NAME: ime_open(IME_NAME, "Il tuo nome", prof.name); break;
+      case B_PROF_NAME: ime_open(IME_NAME, T("Il tuo nome"), prof.name); break;
       case B_PROF_ABOUT: popup_open_about(); break;
       case B_PROF_PHOTO: pick_mode = 1; screen = S_PICKER; pick_load(""); break;
       default: handle_extra(id, arg); break;
@@ -1552,7 +1580,7 @@ int main(void) {
         else if (screen == S_PREVIEW) screen = S_PICKER;
       }
       int ch_ro = screen == S_CHAT && cur_chat >= 0 && cur_chat < nchats && chats[cur_chat].channel;
-      if ((pressed & SCE_CTRL_CROSS) && screen == S_CHAT && !ch_ro && !menu_open && !viewer_open) ime_open(IME_DRAFT, "Scrivi un messaggio", draft);
+      if ((pressed & SCE_CTRL_CROSS) && screen == S_CHAT && !ch_ro && !menu_open && !viewer_open) ime_open(IME_DRAFT, T("Scrivi un messaggio"), draft);
       if ((pressed & SCE_CTRL_CROSS) && screen == S_LIST && !popup_open && !menu_open) { if (nav_mode && nvis > 0 && list_sel < nvis) open_chat(visible_idx[list_sel]); else { nav_mode = 1; list_sel_dirty = 1; } }
       if (is_tab(screen) && !popup_open && !menu_open && !viewer_open && ((pressed & SCE_CTRL_LTRIGGER) || (pressed & SCE_CTRL_RTRIGGER))) {
         // tappe: 0 Tutte, 1 Non lette, 2 Gruppi, 3 Aggiornamenti, 4 Community, 5 Chiamate. R1 = avanti, L1 = indietro

@@ -1,0 +1,9 @@
+# (it, en, fr, de, es, pt, pt-BR, nl, da, fi, no, sv, pl, tr, ru, ja, ko, zh-Hans, zh-Hant)
+E = [
+("Lingua", "Language", "Langue", "Sprache", "Idioma", "Idioma", None, "Taal", "Sprog", "Kieli", "Språk", "Språk", "Język", "Dil", "Язык", "言語", "언어", "语言", "語言"),
+("Lingua: %s", "Language: %s", "Langue : %s", "Sprache: %s", "Idioma: %s", "Idioma: %s", None, "Taal: %s", "Sprog: %s", "Kieli: %s", "Språk: %s", "Språk: %s", "Język: %s", "Dil: %s", "Язык: %s", "言語: %s", "언어: %s", "语言：%s", "語言：%s"),
+("Automatica (%s)", "Automatic (%s)", "Automatique (%s)", "Automatisch (%s)", "Automático (%s)", "Automático (%s)", None, "Automatisch (%s)", "Automatisk (%s)", "Automaattinen (%s)", "Automatisk (%s)", "Automatiskt (%s)", "Automatyczny (%s)", "Otomatik (%s)", "Автоматически (%s)", "自動（%s）", "자동(%s)", "自动（%s）", "自動（%s）"),
+("Automatica", "Automatic", "Automatique", "Automatisch", "Automático", "Automático", None, "Automatisch", "Automatisk", "Automaattinen", "Automatisk", "Automatiskt", "Automatyczny", "Otomatik", "Автоматически", "自動", "자동", "自动", "自動"),
+("Scegli la lingua", "Choose a language", "Choisir la langue", "Sprache wählen", "Elige el idioma", "Escolha o idioma", None, "Kies een taal", "Vælg sprog", "Valitse kieli", "Velg språk", "Välj språk", "Wybierz język", "Dil seçin", "Выберите язык", "言語を選択", "언어 선택", "选择语言", "選擇語言"),
+("Segue la lingua di sistema della Vita", "Follows the Vita system language", "Suit la langue du système de la Vita", "Folgt der Systemsprache der Vita", "Sigue el idioma del sistema de la Vita", "Segue o idioma do sistema da Vita", "Segue o idioma do sistema do Vita", "Volgt de systeemtaal van de Vita", "Følger Vitas systemsprog", "Seuraa Vitan järjestelmän kieltä", "Følger Vitas systemspråk", "Följer Vitas systemspråk", "Zgodny z językiem systemu Vity", "Vita sistem dilini izler", "Следует языку системы Vita", "Vitaのシステム言語に従います", "Vita 시스템 언어를 따릅니다", "跟随Vita系统语言", "跟隨Vita系統語言"),
+]

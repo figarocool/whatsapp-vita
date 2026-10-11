@@ -22,6 +22,16 @@ Funziona con tre parti:
 
 Il popup di notifica che si apre toccandolo funziona con firmware **3.60 e 3.65**. Su altri firmware le notifiche arrivano senza il tocco.
 
+## Lingue
+
+L'interfaccia è disponibile in **19 lingue**, quelle della Vita: italiano, inglese, francese, tedesco, spagnolo, portoghese (Portogallo e Brasile), olandese, danese, finlandese, norvegese, svedese, polacco, turco, russo, giapponese, coreano e cinese (semplificato e tradizionale).
+
+- All'avvio l'app usa **la lingua di sistema della Vita**. Se la lingua non è tra quelle supportate usa l'inglese.
+- Dal Profilo → *Lingua* si sceglie un'altra lingua, oppure *Automatica* per tornare a quella di sistema. La scelta è in `ux0:data/whatsapp/lang.txt`.
+- Le traduzioni sono in `tools/i18n/part*.py` (una riga per frase, una colonna per lingua); `python3 tools/gen_i18n.py` controlla che i segnaposto (`%d`, `%s`...) siano identici in ogni lingua e rigenera `app/src/i18n_data.c`. Le frasi nel codice sono scritte in italiano e `T("...")` le traduce.
+- Giapponese, coreano e cinese usano font dedicati ricavati da Noto Sans CJK con `tools/make_cjk_fonts.py` (solo i caratteri necessari, circa 50-100 KB l'uno). Altri caratteri asiatici nei messaggi dei contatti possono comparire come quadratini.
+- Le traduzioni non sono state riviste da madrelingua: correzioni benvenute.
+
 ## Aggiornamenti automatici
 
 All'avvio l'app legge `whatsapp-vita-update.json` dall'ultima [release](https://github.com/figarocool/whatsapp-vita/releases). Se la versione è più nuova propone di aggiornare: scarica `whatsapp-vita.vpk` (con barra di avanzamento), controlla la firma SHA-256, estrae il pacchetto e lancia un piccolo installatore (`WHAPUPD01`) che chiude l'app, la sostituisce e la riapre. Dal Profilo → *Controlla aggiornamenti* si può forzare il controllo. Il registro è in `ux0:data/whatsapp/update.log`.
@@ -57,4 +67,4 @@ Il progetto include parti derivate da software GPL-3.0, quindi è distribuito co
 - lo schema di aggiornamento (manifest + installatore separato) è ripreso da *Desktop Mode*;
 - la notifica con tocco usa il metodo documentato da Princess of Sleeping (*SceShell-Notice-PoC*) e da VitaDB Downloader.
 
-Font: Roboto (Apache-2.0); emoji: Noto Color Emoji (OFL).
+Font: Roboto (Apache-2.0); Noto Sans CJK per giapponese, coreano e cinese (SIL OFL 1.1, vedi `app/assets/LICENSE-NotoSansCJK.txt`); emoji: Noto Color Emoji (OFL).

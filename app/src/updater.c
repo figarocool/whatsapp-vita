@@ -1,4 +1,5 @@
 #include "updater.h"
+#include "i18n.h"
 #include "json.h"
 #include <curl/curl.h>
 #include <mbedtls/sha256.h>
@@ -177,13 +178,13 @@ static int fetch_manifest(void) {
 // ---------- thread di controllo ----------
 static void *check_thread(void *arg) {
   int manual = (int)(intptr_t)arg;
-  set_state(UPD_CHECKING); set_msg("Controllo aggiornamenti..."); pthread_mutex_lock(&um); ui.quiet = !manual; pthread_mutex_unlock(&um);
+  set_state(UPD_CHECKING); set_msg(T("Controllo aggiornamenti...")); pthread_mutex_lock(&um); ui.quiet = !manual; pthread_mutex_unlock(&um);
   int rc = fetch_manifest();
-  if (rc < 0) { set_state(UPD_ERROR); set_msg("Impossibile controllare gli aggiornamenti (rete o GitHub)"); }
+  if (rc < 0) { set_state(UPD_ERROR); set_msg(T("Impossibile controllare gli aggiornamenti (rete o GitHub)")); }
   else if (ver_is_newer(ui.tag, ui.current)) {
     if (!strcmp(ui.last_fail_tag, ui.tag) && ui.last_fail_code) { utrace("versione %s gia' fallita (0x%08X): non riprovo da solo", ui.tag, (unsigned)ui.last_fail_code); pthread_mutex_lock(&um); ui.quiet = !manual; pthread_mutex_unlock(&um); }
-    set_state(UPD_AVAILABLE); set_msg("Nuova versione disponibile");
-  } else { set_state(UPD_UPTODATE); set_msg("L'app e' aggiornata"); }
+    set_state(UPD_AVAILABLE); set_msg(T("Nuova versione disponibile"));
+  } else { set_state(UPD_UPTODATE); set_msg(T("L'app e' aggiornata")); }
   u_thread_running = 0; return NULL;
 }
 
@@ -278,7 +279,7 @@ static int promote_directory(const char *path) {
 // Prepara il pacchetto scaricato e avvia l'installatore. Ritorna 0 se l'installatore e' partito.
 static int stage_and_launch(const char *vpk, const char *tag) {
   remove_tree(INSTALL_ROOT); if (mkdirs(INSTALL_ROOT) < 0) return -2;
-  set_state(UPD_EXTRACTING); set_msg("Estraggo i file..."); set_progress(0, 1);
+  set_state(UPD_EXTRACTING); set_msg(T("Estraggo i file...")); set_progress(0, 1);
   if (extract_vpk(vpk, INSTALL_ROOT, 1) < 0) { remove_tree(INSTALL_ROOT); return u_cancel ? -20 : -3; }
   char ver[512], param[512], eboot[512], line[64]; SceIoStat st;
   snprintf(ver, sizeof ver, "%s/assets/version.txt", INSTALL_ROOT); snprintf(param, sizeof param, "%s/sce_sys/param.sfo", INSTALL_ROOT); snprintf(eboot, sizeof eboot, "%s/eboot.bin", INSTALL_ROOT);
@@ -286,19 +287,20 @@ static int stage_and_launch(const char *vpk, const char *tag) {
   if (sceIoGetstat(eboot, &st) < 0 || st.st_size < 1024 || sceIoGetstat(INSTALLED_ROOT, &st) < 0) { remove_tree(INSTALL_ROOT); return -5; }
   if (write_small(VERSION_MARKER, tag) < 0) { remove_tree(INSTALL_ROOT); return -9; }
   // l'installatore e' un'app a parte (WHAPUPD01): solo un altro processo puo' sostituire l'app in esecuzione
-  set_state(UPD_INSTALLING); set_msg("Preparo l'installatore..."); set_progress(0, 0);
+  set_state(UPD_INSTALLING); set_msg(T("Preparo l'installatore...")); set_progress(0, 0);
   remove_tree(HELPER_ROOT);
   if (mkdirs(HELPER_ROOT) < 0 || extract_vpk(HELPER_VPK, HELPER_ROOT, 0) < 0) { remove_tree(HELPER_ROOT); return -6; }
   char hs[512], he[512]; snprintf(hs, sizeof hs, "%s/sce_sys/param.sfo", HELPER_ROOT); snprintf(he, sizeof he, "%s/eboot.bin", HELPER_ROOT);
   if (!file_has(hs, HELPER_TITLE)) { remove_tree(HELPER_ROOT); return -7; }
   if (sceIoGetstat(he, &st) < 0 || st.st_size < 1024) { remove_tree(HELPER_ROOT); return -8; }
   if (wa_make_head_bin(HELPER_ROOT, "app0:/assets/vitashell-head.bin", HELPER_TITLE) < 0) { remove_tree(HELPER_ROOT); return -10; }
-  set_msg("Installo l'installatore...");
+  set_msg(T("Installo l'installatore..."));
   { SceIoStat hst; if (sceIoGetstat("ux0:/app/" HELPER_TITLE, &hst) >= 0) delete_helper_pkg(); }
   int res = promote_directory(HELPER_ROOT); utrace("installatore: promozione -> 0x%08X", (unsigned)res); if (res < 0) return res;
   remove_tree(HELPER_ROOT); write_small(HELPER_MARKER, HELPER_TITLE);
+  write_small("ur0:tai/wa_upd_lang.txt", i18n_code(i18n_lang()));   // l'installatore mostra la sua schermata in questa lingua
   char uri[64]; snprintf(uri, sizeof uri, "psgm:play?titleid=%s", HELPER_TITLE);
-  set_msg("Avvio l'installazione: l'app si riaprira' da sola"); res = sceAppMgrLaunchAppByUri(0xFFFFF, uri); utrace("installatore: avvio -> 0x%08X", (unsigned)res); if (res < 0) return res;
+  set_msg(T("Avvio l'installazione: l'app si riaprira' da sola")); res = sceAppMgrLaunchAppByUri(0xFFFFF, uri); utrace("installatore: avvio -> 0x%08X", (unsigned)res); if (res < 0) return res;
   pthread_mutex_lock(&um); ui.must_exit = 1; pthread_mutex_unlock(&um);
   // Come VitaShell: lanciata l'altra app, si esce SUBITO. Se l'app restava in esecuzione, la Vita chiedeva "non puo' partire perche' e ancora aperta: OK per chiuderla".
   sceKernelExitProcess(0);
@@ -308,14 +310,14 @@ static int stage_and_launch(const char *vpk, const char *tag) {
 
 static const char *code_text(int c, char *b, size_t n) {
   switch (c) {
-    case -1: snprintf(b, n, "Download non riuscito (rete o spazio)"); break;
-    case -2: snprintf(b, n, "Impossibile creare le cartelle"); break;
-    case -3: snprintf(b, n, "Il pacchetto scaricato e' danneggiato"); break;
-    case -4: snprintf(b, n, "Il pacchetto non corrisponde alla versione"); break;
-    case -5: snprintf(b, n, "Pacchetto incompleto"); break;
-    case -6: case -7: case -8: snprintf(b, n, "Installatore mancante o non valido"); break;
-    case -20: snprintf(b, n, "Aggiornamento annullato"); break;
-    default: snprintf(b, n, "Installazione non riuscita (codice %08X)", (unsigned)c); break;
+    case -1: snprintf(b, n, T("Download non riuscito (rete o spazio)")); break;
+    case -2: snprintf(b, n, T("Impossibile creare le cartelle")); break;
+    case -3: snprintf(b, n, T("Il pacchetto scaricato e' danneggiato")); break;
+    case -4: snprintf(b, n, T("Il pacchetto non corrisponde alla versione")); break;
+    case -5: snprintf(b, n, T("Pacchetto incompleto")); break;
+    case -6: case -7: case -8: snprintf(b, n, T("Installatore mancante o non valido")); break;
+    case -20: snprintf(b, n, T("Aggiornamento annullato")); break;
+    default: snprintf(b, n, T("Installazione non riuscita (codice %08X)"), (unsigned)c); break;
   }
   return b;
 }
@@ -325,7 +327,7 @@ static void *install_thread(void *arg) {
   pthread_mutex_lock(&um); snprintf(tag, sizeof tag, "%s", ui.tag); pthread_mutex_unlock(&um);
   u_cancel = 0; mkdirs(UPD_DIR);
   // 1) download (con la barra di avanzamento dell'interfaccia dell'app)
-  set_state(UPD_DOWNLOADING); set_msg("Scarico l'aggiornamento..."); set_progress(0, m_size);
+  set_state(UPD_DOWNLOADING); set_msg(T("Scarico l'aggiornamento...")); set_progress(0, m_size);
   asset_url(tag, CORE_ASSET, url, sizeof url);
   { char cur[65]; if (sha256_file(CORE_FILE, cur) == 0 && !strcasecmp(cur, m_digest)) utrace("pacchetto gia' scaricato"); else {
       sceIoRemove(CORE_PART); int fd = sceIoOpen(CORE_PART, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
@@ -335,12 +337,12 @@ static void *install_thread(void *arg) {
       if (r == -2) { sceIoRemove(CORE_PART); rc = -20; goto fail; }
       if (r < 0 || fs.failed) { sceIoRemove(CORE_PART); rc = -1; goto fail; }
       // 2) verifica
-      set_state(UPD_VERIFYING); set_msg("Controllo la firma (SHA-256)..."); set_progress(0, 0);
+      set_state(UPD_VERIFYING); set_msg(T("Controllo la firma (SHA-256)...")); set_progress(0, 0);
       if (sha256_file(CORE_PART, hex) < 0 || strcasecmp(hex, m_digest)) { utrace("SHA-256 diverso: atteso %s, trovato %s", m_digest, hex); sceIoRemove(CORE_PART); rc = -3; goto fail; }
       sceIoRemove(CORE_FILE); if (sceIoRename(CORE_PART, CORE_FILE) < 0) { rc = -2; goto fail; }
   } }
 #ifdef SAFE_BUILD
-  rc = -30; set_state(UPD_ERROR); set_msg("Pacchetto scaricato in ux0:data/whatsapp/updates: installalo con VitaShell"); u_thread_running = 0; return NULL;
+  rc = -30; set_state(UPD_ERROR); set_msg(T("Pacchetto scaricato in ux0:data/whatsapp/updates: installalo con VitaShell")); u_thread_running = 0; return NULL;
 #else
   rc = stage_and_launch(CORE_FILE, tag);
   if (rc == 0) { u_thread_running = 0; return NULL; }

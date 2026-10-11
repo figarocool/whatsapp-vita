@@ -63,7 +63,7 @@ static int wt_cjk(const unsigned char *p, int *len) {
   unsigned cp = ((p[0] & 0xFu) << 12) | ((p[1] & 0x3Fu) << 6) | (p[2] & 0x3Fu);
   return (cp >= 0x3000 && cp < 0xA000) || (cp >= 0xAC00 && cp < 0xD7B0) || (cp >= 0xFF00 && cp < 0xFFF0);
 }
-static void wrap_text(const char *s, int x, int y, int w, int size, unsigned col, int lh, int center) {
+static int wrap_text(const char *s, int x, int y, int w, int size, unsigned col, int lh, int center) {   // ritorna la y dopo l'ultima riga
   char line[400] = ""; const unsigned char *p = (const unsigned char *)s; int prevcj = 0;
   while (*p) {
     if (*p == '\n') { if (line[0]) text(center ? x + (w - tw(size, line)) / 2 : x, y, col, size, line); y += lh; line[0] = 0; prevcj = 0; p++; continue; }
@@ -77,7 +77,8 @@ static void wrap_text(const char *s, int x, int y, int w, int size, unsigned col
     else snprintf(line, sizeof line, "%s", cand);
     prevcj = cj;
   }
-  if (line[0]) text(center ? x + (w - tw(size, line)) / 2 : x, y, col, size, line);
+  if (line[0]) { text(center ? x + (w - tw(size, line)) / 2 : x, y, col, size, line); y += lh; }
+  return y;
 }
 
 // ---------- schede in basso ----------
@@ -738,15 +739,16 @@ static void draw_about(void) {
   { char nm[] = "Stefano Basile"; text(160 - tw(22, nm) / 2, 350, C_TEXT, 22, nm); }
   UpdInfo ui_; upd_snapshot(&ui_); { char vt[96]; snprintf(vt, sizeof vt, T("Versione %s"), ui_.current); text(160 - tw(14, vt) / 2, 384, C_SUB, 14, vt); }
   const float cx = 320, cw = SW - cx - 30, top = 60;
-  misc_clamp(560, SH - top);
+  static float about_h = 600; misc_clamp(about_h, SH - top);
   vita2d_enable_clipping(); vita2d_set_clip_rectangle(cx - 6, top, SW, SH); clip_y0 = top; clip_y1 = SH;
   float y = 80 - misc_scroll;
   textb((int)cx, (int)y, C_GREEN2, 26, T("Creato da Stefano Basile")); y += 46;
-  wrap_text(T("Stefano Basile e' nato nel 1984 a San Pancrazio Salentino (Brindisi) ed e' un appassionato di cybercultura. Online dal 1994, nel 2001 ha pubblicato il suo primo script mIRC e ha creato xploit.it, un portale italiano molto noto, definito \"un'enciclopedia dell'hacking italiano\". Oggi e' il fondatore di 8byte, software house italiana che sviluppa Softshop e RistoManager."), (int)cx, (int)y, (int)cw, 18, C_TEXT, 26, 0);
-  y += 330;
+  y = wrap_text(T("Stefano Basile e' nato nel 1984 a San Pancrazio Salentino (Brindisi) ed e' un appassionato di cybercultura. Online dal 1994, nel 2001 ha pubblicato il suo primo script mIRC e ha creato xploit.it, un portale italiano molto noto, definito \"un'enciclopedia dell'hacking italiano\". Oggi e' il fondatore di 8byte, software house italiana che sviluppa Softshop e RistoManager."), (int)cx, (int)y, (int)cw, 18, C_TEXT, 26, 0);
+  y += 24;
   text((int)cx, (int)y, C_SUB, 14, T("Sito web")); text((int)cx, (int)y + 20, C_GREEN2, 20, "stefanobasile.com"); y += 66;
   text((int)cx, (int)y, C_SUB, 14, "GitHub"); text((int)cx, (int)y + 20, C_GREEN2, 20, "github.com/figarocool"); y += 66;
   text((int)cx, (int)y, C_SUB, 14, T("Codice sorgente e altri progetti")); text((int)cx, (int)y + 20, C_GREEN2, 20, "github.com/figarocool/whatsapp-vita");
+  about_h = y + misc_scroll + 70 - top;   // altezza reale del contenuto (usata dal frame dopo per lo scorrimento)
   vita2d_disable_clipping(); clip_y0 = 0; clip_y1 = SH;
 }
 static void draw_lang(void) {

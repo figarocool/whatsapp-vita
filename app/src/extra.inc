@@ -792,9 +792,9 @@ static int vp_draw(float x, float y, float w, float h) {
   vita2d_texture *t = vp.state == 2 ? player_frame() : NULL;
   { static unsigned long long nf_t0; static char nk[260]; if (strcmp(nk, vp.key)) { snprintf(nk, sizeof nk, "%s", vp.key); nf_t0 = 0; }
     if (vp.state == 2 && !t && !vp.audio) { if (!nf_t0) nf_t0 = sceKernelGetProcessTimeWide(); else if (sceKernelGetProcessTimeWide() - nf_t0 > 4000000ULL) {
-        char d[160], ad[160]; player_video_diag(d, sizeof d); player_audio_diag(ad, sizeof ad); crumb("lettore: nessuna immagine dopo 4 s (tentativo %d); %s; %s", vp.retries + 1, d, ad); player_close();
+        char d[200], ad[160], sd[260]; player_video_diag(d, sizeof d); player_audio_diag(ad, sizeof ad); player_stream_diag(sd, sizeof sd); crumb("lettore: nessuna immagine dopo 4 s (tentativo %d); %s; %s; %s", vp.retries + 1, d, ad, sd); player_close();
         if (vp.retries < 2) { vp.retries++; vp.opened = 0; vp.retry_at = frame_no + 25; }   // riprova da zero: spesso e' un intoppo momentaneo del lettore
-        else { sceIoRemove(vp.path); vp.state = 3; }
+        else { char bad[330]; snprintf(bad, sizeof bad, "%s.bad", vp.path); sceIoRemove(bad); sceIoRename(vp.path, bad); vp.state = 3; }   // il file si conserva (.bad) per poterlo esaminare
         nf_t0 = 0; } } else nf_t0 = 0; }
   { static unsigned long long t0; static char lk[260]; if (strcmp(lk, vp.key)) { snprintf(lk, sizeof lk, "%s", vp.key); t0 = 0; } if (vp.state == 2 && !t0) t0 = sceKernelGetProcessTimeWide(); if (vp.state == 2 && t0) { if (t && player_frames() == 1) { { unsigned a_ = 0, b_ = 0; player_size(&a_, &b_); crumb("lettore: primo fotogramma %ux%u", a_, b_); } t0 = 1; } else if (t0 > 1000 && !t && sceKernelGetProcessTimeWide() - t0 > 5000000ULL) { crumb("lettore: nessun fotogramma dopo 5 s"); t0 = 1; } } }
   if (t) { unsigned pw_ = 0, ph_ = 0; player_size(&pw_, &ph_); float tw0 = pw_ ? (float)pw_ : vita2d_texture_get_width(t), th0 = ph_ ? (float)ph_ : vita2d_texture_get_height(t), s = fminf(w / tw0, h / th0); vita2d_draw_texture_scale(t, x + (w - tw0 * s) / 2, y + (h - th0 * s) / 2, s, s); return 1; }

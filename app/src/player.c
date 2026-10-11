@@ -15,6 +15,8 @@ static SceAvPlayerHandle h; static int open_ok, running, audio_port = -1, audio_
 static pthread_t audio_thr; static vita2d_texture *tex; static unsigned tex_w, tex_h;
 
 static unsigned ga_n, ga_fail; static unsigned long long ga_bytes;
+static volatile int ev_last = -1, ev_src = -1; static volatile unsigned ev_n; static char ev_log[96];
+static void ev_cb(void *p, int32_t id, int32_t src, void *data) { (void)p; (void)data; ev_last = id; ev_src = src; if (ev_n < 12) { size_t l = strlen(ev_log); if (l < sizeof ev_log - 8) snprintf(ev_log + l, sizeof ev_log - l, "%d,", (int)id); } ev_n++; }
 static void *a_alloc(void *arg, uint32_t al, uint32_t sz) { (void)arg; void *p = memalign(al < 16 ? 16 : al, sz); if (p) { ga_n++; ga_bytes += sz; } else ga_fail++; return p; }
 static void a_free(void *arg, void *p) { (void)arg; free(p); }
 // i fotogrammi li scrive il decodificatore hardware: serve memoria CDRAM visibile al GPU (come negli esempi di SceAvPlayer)
@@ -58,7 +60,7 @@ int player_open(const char *path, int loop) {
   sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
   SceAvPlayerInitData d; memset(&d, 0, sizeof d);
   d.memoryReplacement.allocate = a_alloc; d.memoryReplacement.deallocate = a_free; d.memoryReplacement.allocateTexture = t_alloc; d.memoryReplacement.deallocateTexture = t_free;
-  d.basePriority = 0xA0; d.numOutputVideoFrameBuffers = 5; d.autoStart = 1; d.debugLevel = 0;
+  d.eventReplacement.eventCallback = ev_cb; ev_n = 0; ev_log[0] = 0; d.basePriority = 0xA0; d.numOutputVideoFrameBuffers = 5; d.autoStart = 1; d.debugLevel = 0;
   h = sceAvPlayerInit(&d); if (!h || ((unsigned)h >> 16) == 0x806A) { int er = (int)h; h = 0; return er ? er : -1; }   // l'handle e' un puntatore (anche con il bit alto acceso): errori solo 0 e 0x806Axxxx
   int ar = sceAvPlayerAddSource(h, path); if (ar < 0) { sceAvPlayerClose(h); h = 0; return ar; }
   sceAvPlayerSetLooping(h, loop ? 1 : 0);
@@ -104,3 +106,8 @@ int player_ended(void) {
 void player_size(unsigned *w, unsigned *h2) { *w = tex_w; *h2 = tex_h; }
 void player_audio_diag(char *out, int n) { snprintf(out, n, "audio: frames=%u ch=%d rate=%d size=%d grain=%d porta=%d", a_frames, a_ch, a_rate, a_size, a_grain, a_open_rc); }
 void player_video_diag(char *out, int n) { snprintf(out, n, "memoria fotogrammi: ok=%u fallite=%u (ultima %u byte); heap lettore: %u blocchi, %u falliti, %llu KB; attivo=%d", alloc_ok, alloc_fail, alloc_last_fail, ga_n, ga_fail, ga_bytes / 1024, open_ok ? sceAvPlayerIsActive(h) : -1); }
+void player_stream_diag(char *out, int n) {
+  int w = 0; out[0] = 0; if (!open_ok) return;
+  for (uint32_t i = 0; i < 4; i++) { SceAvPlayerStreamInfo si; memset(&si, 0, sizeof si); if (sceAvPlayerGetStreamInfo(h, i, &si) == 0 && w < n - 40) w += snprintf(out + w, n - w, "[flusso %u tipo %u dur %llu ms %ux%u] ", i, si.type, (unsigned long long)si.duration, si.details.video.width, si.details.video.height); }
+  if (w < n - 40) snprintf(out + w, n - w, "eventi: %s (n=%u)", ev_log, ev_n);
+}

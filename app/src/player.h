@@ -12,3 +12,4 @@ unsigned player_frames(void);   // fotogrammi ricevuti finora (diagnostica)
 void player_size(unsigned *w, unsigned *h);   // dimensioni dell'ultimo fotogramma
 void player_audio_diag(char *out, int n);   // stato dell'audio (diagnostica)
 void player_video_diag(char *out, int n);
+void player_stream_diag(char *out, int n);

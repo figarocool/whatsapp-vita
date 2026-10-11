@@ -1,0 +1,17 @@
+# DATI PRIVATI: sessione WhatsApp, messaggi, media, chiamate. Non vanno MAI pubblicati.
+bridge/data/
+bridge/*.log
+bridge/.env
+# dipendenze e risultati di compilazione
+node_modules/
+build/
+*.vpk
+*.suprx
+*.self
+*.velf
+# strumenti locali
+tools/emu_drive.py
+*.pid
+*.out
+release-out/
+app/build-release/

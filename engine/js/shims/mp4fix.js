@@ -68,5 +68,16 @@ export function fixMp4(b, maxLevel = 41) {   // ritorna { buf, notes } oppure nu
       }
     }
   }
+  // dimensioni del contenitore portate a multipli di 16 (come il flusso, ora senza ritaglio); le misure vere restano in coda al file, in un riquadro 'free'
+  if (changed && found.path.length >= 7 && /^avc[13]$/.test(buf.toString('latin1', found.path[6] + 4, found.path[6] + 8))) {
+    const av = found.path[6], tw = buf.readUInt16BE(av + 32), th = buf.readUInt16BE(av + 34), aw = (tw + 15) & ~15, ah = (th + 15) & ~15;
+    if (aw !== tw || ah !== th) {
+      buf = Buffer.from(buf); buf.writeUInt16BE(aw, av + 32); buf.writeUInt16BE(ah, av + 34);
+      const tk = findBox(buf, found.path[1] + 8, found.path[1] + u32(buf, found.path[1]), 'tkhd');
+      if (tk && u32(buf, tk.o) >= 92) { buf.writeUInt32BE(aw * 65536, tk.o + 84); buf.writeUInt32BE(ah * 65536, tk.o + 88); }
+      const tail = Buffer.alloc(16); tail.writeUInt32BE(16, 0); tail.write('free', 4, 'latin1'); tail.write('WVDM', 8, 'latin1'); tail.writeUInt16BE(tw, 12); tail.writeUInt16BE(th, 14);
+      buf = Buffer.concat([buf, tail]); notes.push(`dimensioni ${tw}x${th} -> ${aw}x${ah} nel contenitore`);
+    }
+  }
   return changed ? { buf, notes } : null;
 }

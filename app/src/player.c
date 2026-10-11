@@ -64,12 +64,13 @@ static char wav_dbg[200];
 extern void player_log(const char *m);
 static void *wav_loop(void *arg) {
   // si porta sempre tutto a 48000 Hz stereo: e' l'unico formato che la porta principale accetta ovunque
-  sceKernelChangeThreadPriority(0, 64); (void)arg; const int grain = 2048; const int nsamp = (int)(wav_len / (wav_ch * 2)); int16_t *src = (int16_t *)wav_buf; int16_t *tmp = malloc(grain * 2 * sizeof(int16_t));
+  sceKernelChangeThreadPriority(0, 64); (void)arg; const int grain = 2048; const int nsamp = (int)(wav_len / (wav_ch * 2)); int16_t *src = (int16_t *)wav_buf; int16_t *bufs[2] = { memalign(64, grain * 2 * sizeof(int16_t)), memalign(64, grain * 2 * sizeof(int16_t)) }; int16_t *tmp = bufs[0]; int bi = 0; unsigned long long tprev = 0, gapmax = 0, cmax = 0; unsigned late = 0;
   wav_port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, grain, 48000, SCE_AUDIO_OUT_MODE_STEREO);
   snprintf(wav_dbg, sizeof wav_dbg, "vocale: porta audio %d, %d campioni a %d Hz, %d canali", wav_port, nsamp, wav_rate, wav_ch); player_log(wav_dbg);
   if (wav_port >= 0) { int vol[2] = { SCE_AUDIO_OUT_MAX_VOL, SCE_AUDIO_OUT_MAX_VOL }; sceAudioOutSetVolume(wav_port, SCE_AUDIO_VOLUME_FLAG_L_CH | SCE_AUDIO_VOLUME_FLAG_R_CH, vol); }
   unsigned long long pos = 0, step = ((unsigned long long)wav_rate << 16) / 48000; unsigned blocks = 0; int mx = 0;
   while (wav_run && wav_port >= 0 && (int)(pos >> 16) < nsamp) {
+    unsigned long long tc0 = sceKernelGetProcessTimeWide(); tmp = bufs[bi]; bi ^= 1;
     for (int i = 0; i < grain; i++) {
       int ix = (int)(pos >> 16); float t = (float)(pos & 0xFFFF) / 65536.0f; float o[2] = { 0, 0 };
       if (ix < nsamp) for (int c = 0; c < (wav_ch == 1 ? 1 : 2); c++) {   // interpolazione cubica (Catmull-Rom) tra i campioni: niente scalini udibili
@@ -82,11 +83,12 @@ static void *wav_loop(void *arg) {
       for (int c = 0; c < 2; c++) { if (o[c] > 32767) o[c] = 32767; if (o[c] < -32768) o[c] = -32768; }
       if ((int)o[0] > mx) mx = (int)o[0]; tmp[i * 2] = (int16_t)o[0]; tmp[i * 2 + 1] = (int16_t)o[1]; pos += step;
     }
-    int orr = sceAudioOutOutput(wav_port, tmp); blocks++; if (orr < 0 && blocks < 3) { snprintf(wav_dbg, sizeof wav_dbg, "vocale: sceAudioOutOutput errore 0x%x", (unsigned)orr); player_log(wav_dbg); }
+    unsigned long long tc1 = sceKernelGetProcessTimeWide(); if (tc1 - tc0 > cmax) cmax = tc1 - tc0;
+    int orr = sceAudioOutOutput(wav_port, tmp); blocks++; { unsigned long long tn = sceKernelGetProcessTimeWide(); if (tprev) { unsigned long long g = tn - tprev; if (g > gapmax) gapmax = g; if (g > (unsigned long long)grain * 1000000ULL / 48000ULL + 8000) late++; } tprev = tn; } if (orr < 0 && blocks < 3) { snprintf(wav_dbg, sizeof wav_dbg, "vocale: sceAudioOutOutput errore 0x%x", (unsigned)orr); player_log(wav_dbg); }
     wav_pos = (size_t)(pos >> 16) * wav_ch * 2; if (wav_pos > wav_len) wav_pos = wav_len;
   }
-  snprintf(wav_dbg, sizeof wav_dbg, "vocale: fine, %u blocchi, picco %d", blocks, mx); player_log(wav_dbg);
-  free(tmp); wav_pos = wav_len; wav_done = 1; return NULL;
+  snprintf(wav_dbg, sizeof wav_dbg, "vocale: fine, %u blocchi, picco %d, calcolo max %llu us, giro max %llu us (blocco %d us), giri in ritardo %u", blocks, mx, cmax, gapmax, grain * 1000000 / 48000, late); player_log(wav_dbg);
+  free(bufs[0]); free(bufs[1]); wav_pos = wav_len; wav_done = 1; return NULL;
 }
 static int wav_open(const char *path) {
   SceUID f = sceIoOpen(path, SCE_O_RDONLY, 0); if (f < 0) return -1; SceOff sz = sceIoLseek(f, 0, SCE_SEEK_END); sceIoLseek(f, 0, SCE_SEEK_SET); if (sz < 44 || sz > 40 * 1024 * 1024) { sceIoClose(f); return -1; }

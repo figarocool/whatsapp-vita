@@ -196,10 +196,6 @@ static void draw_statusview(void) {
   draw_avatar(jd, nm, 44, 44, 18); textb(74, 26, C_WHITE, 20, nm);
   char tm[16]; fmt_ago((long)json_num(it, "ts", 0), tm, sizeof tm); text(74, 50, RGBA8(255, 255, 255, 200), 13, tm);
   btn(0, 0, SW / 3, SH, B_ST_PREV, 0); btn(SW / 3, 0, SW - SW / 3, SH, B_ST_NEXT, 0);
-  if (!strcmp(kind, "video")) {   // i video delle storie: si convertono per la Vita e si salvano (con barra di avanzamento)
-    const char *lb = T("Salva video"); int w = tw(18, lb) + 60; int bx = st_mine ? 20 : (SW - w) / 2;
-    rrect(bx, SH - 62, w, 44, 22, RGBA8(0x25, 0xD3, 0x66, 255)); text(bx + 30, SH - 51, C_WHITE, 18, lb); btn(bx, SH - 62, w, 44, B_ST_SAVE, 0);
-  }
   if (st_mine) {
     char v[60]; snprintf(v, sizeof v, T("Visto da %d"), (int)json_num(it, "views", 0)); int w = tw(18, v) + 50;
     rrect((SW - w) / 2, SH - 62, w, 44, 22, RGBA8(32, 32, 32, 255)); text((SW - w) / 2 + 25, SH - 51, C_WHITE, 18, v); btn((SW - w) / 2, SH - 62, w, 44, B_ST_VIEWERS, 0);
@@ -906,7 +902,6 @@ static void handle_extra(int id, int arg) {
     case B_STORY_NEW: popup_begin(T("Nuova storia")); popup_add(T("Testo"), A_STORY_TEXT, 0); popup_add(T("Foto"), A_STORY_PHOTO, 0); popup_add(T("Annulla"), A_CLOSE, 0); break;
     case B_FOLLOW_CH: ime_open(IME_CHLINK, T("Link del canale"), ""); break;
     case B_ST_VIEWERS: { jv *its = qres2_arr("mystatus"); if (its && st_item < its->count) { char e[100], pth[200]; url_enc(json_str(its->items[st_item], "id", ""), e, sizeof e); snprintf(pth, sizeof pth, "/viewers/%s", e); query2("viewers", pth); viewers_wait = 1; } break; }
-    case B_ST_SAVE: { jv *a = qarr("updates"); jv *its = st_mine ? qres2_arr("mystatus") : (a && st_idx < a->count ? json_get(a->items[st_idx], "items") : NULL); if (its && st_item < its->count) start_prep("status@broadcast", json_str(its->items[st_item], "id", ""), "video", ""); break; }
     case B_ST_PREV: st_step(-1); break;
     case B_ST_NEXT: st_step(1); break;
     case B_COMM_ROW: { jv *a = qarr("comm"); if (!a) break; int ci = arg / 100, gi = arg % 100; if (ci < a->count) { jv *g = json_get(a->items[ci], "groups"); if (g && gi < g->count) open_by_jid(json_str(g->items[gi], "id", "")); } break; }

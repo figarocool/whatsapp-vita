@@ -752,7 +752,7 @@ static void vp_want(const char *jid, const char *id) {
 static void aud_toggle(const char *jid, const char *id) {
   char k[260]; snprintf(k, sizeof k, "%s|%s", jid, id);
   if (vp.audio && !strcmp(k, vp.key)) { vp_stop(); return; }   // gia' in corso: ferma
-  vp_stop(); vp.audio = 1; vp_want(jid, id); vp.audio = 1; vp_touched = 0;
+  crumb("audio: tocco su %s", id); vp_stop(); vp.audio = 1; vp_want(jid, id); vp.audio = 1; vp_touched = 0;
 }
 static int aud_state(const char *jid, const char *id, int *pct, int *secs) {
   if (!vp.audio || !vp.key[0]) return 0; char k[260]; snprintf(k, sizeof k, "%s|%s", jid, id); if (strcmp(k, vp.key)) return 0;

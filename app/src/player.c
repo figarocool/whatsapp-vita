@@ -3,6 +3,7 @@
 #include <psp2/audioout.h>
 #include <psp2/sysmodule.h>
 #include <psp2/gxm.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/sysmem.h>
 #include <malloc.h>
 #include <pthread.h>
@@ -27,7 +28,7 @@ static void *t_alloc(void *arg, uint32_t al, uint32_t sz) {
 static void t_free(void *arg, void *p) {
   (void)arg; for (int i = 0; i < 24; i++) if (tex_blk[i].base == p) { vita2d_wait_rendering_done(); sceGxmUnmapMemory(p); sceKernelFreeMemBlock(tex_blk[i].uid); tex_blk[i].base = NULL; return; }
 }
-static unsigned frames_seen;
+static unsigned frames_seen; static int seen_active; static unsigned long long open_at;
 
 static void *audio_loop(void *arg) {
   (void)arg; SceAvPlayerFrameInfo fi;
@@ -50,7 +51,7 @@ int player_open(const char *path, int loop) {
   h = sceAvPlayerInit(&d); if (!h || ((unsigned)h >> 16) == 0x806A) { int er = (int)h; h = 0; return er ? er : -1; }   // l'handle e' un puntatore (anche con il bit alto acceso): errori solo 0 e 0x806Axxxx
   int ar = sceAvPlayerAddSource(h, path); if (ar < 0) { sceAvPlayerClose(h); h = 0; return ar; }
   sceAvPlayerSetLooping(h, loop ? 1 : 0);
-  frames_seen = 0; open_ok = 1; running = 1; audio_thr_on = pthread_create(&audio_thr, NULL, audio_loop, NULL) == 0;
+  frames_seen = 0; seen_active = 0; open_at = sceKernelGetProcessTimeWide(); open_ok = 1; running = 1; audio_thr_on = pthread_create(&audio_thr, NULL, audio_loop, NULL) == 0;
   return 0;
 }
 
@@ -83,4 +84,9 @@ vita2d_texture *player_frame(void) {
 }
 unsigned player_frames(void) { return frames_seen; }
 unsigned long long player_time_ms(void) { return open_ok ? (unsigned long long)sceAvPlayerCurrentTime(h) : 0; }
-int player_ended(void) { return open_ok && !sceAvPlayerIsActive(h); }
+int player_ended(void) {
+  if (!open_ok) return 0;
+  if (sceAvPlayerIsActive(h)) { seen_active = 1; return 0; }
+  if (seen_active) return 1;   // era partito ed ora si e' fermato = finito
+  return sceKernelGetProcessTimeWide() - open_at > 15ULL * 1000000ULL;   // mai partito entro 15 s: rinuncia
+}

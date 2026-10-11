@@ -816,7 +816,7 @@ static void extra_tick(void) {
   { // aggiornamenti: controllo automatico dopo l'avvio, poi popup quando c'e' una versione nuova
     static int auto_done, prompted_tag_set; static char prompted[48]; UpdInfo u; upd_snapshot(&u);
     if (!auto_done && frame_no > 900 && (screen == S_LIST) && !ime_active && !popup_open && !strcmp(wa_status, "open")) { auto_done = 1; upd_check(0); }
-    { static int cl_done; if (!cl_done && frame_no > 2700 && (screen == S_LIST || screen == S_PROFILE) && !popup_open && !ime_active && !upd_busy()) { cl_done = 1; upd_cleanup_later(); } }   // dopo ~45 s d'uso: toglie la bolla dell'installatore rimasta dopo l'aggiornamento
+    { static int cl_done; if (!cl_done && frame_no > 240 && (screen == S_LIST || screen == S_PROFILE || screen == S_LOGIN) && !popup_open && !ime_active && !upd_busy()) { cl_done = 1; upd_cleanup_later(); } }   // dopo ~4 s dalla comparsa dell'app: toglie la bolla dell'installatore rimasta dopo l'aggiornamento
     if (u.must_exit) { static unsigned t0; if (!t0) t0 = frame_no; if (frame_no - t0 > 120) quit_req = 1; }
     if (u.state == UPD_AVAILABLE && !popup_open && !ime_active && !upd_busy() && (screen == S_LIST || screen == S_PROFILE) && !(prompted_tag_set && !strcmp(prompted, u.tag))) {
       int failed_before = !strcmp(u.last_fail_tag, u.tag) && u.last_fail_code;

@@ -161,16 +161,16 @@ static struct { volatile int active, cancel; char title[80], phase[96]; volatile
 static void xfer_phase(const char *ph) { pthread_mutex_lock(&mu); snprintf(xfer.phase, sizeof xfer.phase, "%s", ph); pthread_mutex_unlock(&mu); }
 static int xfer_dl_cb(unsigned long long done, unsigned long long total) { xfer.done = done; xfer.total = total; return xfer.cancel; }
 // anteprima video in-app (storie e chat): il bridge converte, l'app scarica in cache e lo riproduce con SceAvPlayer
-static struct { char key[260]; char path[300]; volatile int gen, state, pct, phase, opened, audio; } vp;
+static struct { char key[260]; char path[300]; volatile int gen, state, pct, phase, opened, audio, retries; volatile unsigned retry_at; } vp;
 static void aud_toggle(const char *jid, const char *id); static int aud_state(const char *jid, const char *id, int *pct, int *secs);   // audio in chat (in extra.inc)   // state: 0 niente, 1 preparo, 2 pronto, 3 errore; phase: 0 WhatsApp, 1 conversione, 2 download
 static __thread int vp_job_gen;
 static int vp_dl_cb(unsigned long long done, unsigned long long total) { vp.pct = total ? (int)(100 * done / total) : 0; return vp_job_gen != vp.gen; }   // annulla se nel frattempo si e' passati ad altro
-static void vp_cachefile(const char *id, int audio, char *out, size_t n) { char s[48]; snprintf(s, sizeof s, "%.40s", id); for (char *p = s; *p; p++) if (*p == '/' || *p == ':' || *p == '\\' || *p == '=') *p = '_'; snprintf(out, n, "ux0:data/whatsapp/cache/V_%s.%s", s, audio ? "m4a" : "mp4"); }
+static void vp_cachefile(const char *id, int audio, char *out, size_t n) { char s[48]; snprintf(s, sizeof s, "%.40s", id); for (char *p = s; *p; p++) if (*p == '/' || *p == ':' || *p == '\\' || *p == '=') *p = '_'; snprintf(out, n, "ux0:data/whatsapp/cache/V2_%s.%s", s, audio ? "m4a" : "mp4"); }
 // la cache dei video/audio resta fra un avvio e l'altro: si cancella solo il piu' vecchio quando supera 150 MB
 static void vp_cache_wipe(void) {
   for (int round = 0; round < 200; round++) {
     SceUID d = sceIoDopen("ux0:data/whatsapp/cache"); if (d < 0) return; SceIoDirent e; long long tot = 0; char oldest[300] = ""; unsigned long long ot = ~0ULL;
-    while (sceIoDread(d, &e) > 0) { if (strncmp(e.d_name, "V_", 2)) continue; tot += e.d_stat.st_size; unsigned long long t = (unsigned long long)e.d_stat.st_mtime.year * 400ULL * 86400 + (unsigned long long)e.d_stat.st_mtime.month * 32 * 86400 + (unsigned long long)e.d_stat.st_mtime.day * 86400 + e.d_stat.st_mtime.hour * 3600 + e.d_stat.st_mtime.minute * 60 + e.d_stat.st_mtime.second; if (t < ot) { ot = t; snprintf(oldest, sizeof oldest, "ux0:data/whatsapp/cache/%s", e.d_name); } }
+    while (sceIoDread(d, &e) > 0) { if (e.d_name[0] != 'V') continue; tot += e.d_stat.st_size; unsigned long long t = (unsigned long long)e.d_stat.st_mtime.year * 400ULL * 86400 + (unsigned long long)e.d_stat.st_mtime.month * 32 * 86400 + (unsigned long long)e.d_stat.st_mtime.day * 86400 + e.d_stat.st_mtime.hour * 3600 + e.d_stat.st_mtime.minute * 60 + e.d_stat.st_mtime.second; if (t < ot) { ot = t; snprintf(oldest, sizeof oldest, "ux0:data/whatsapp/cache/%s", e.d_name); } }
     sceIoDclose(d); if (tot <= 150LL * 1024 * 1024 || !oldest[0]) return; sceIoRemove(oldest);
   }
 }

@@ -17,13 +17,14 @@ static pthread_t audio_thr; static vita2d_texture *tex; static unsigned tex_w, t
 static void *a_alloc(void *arg, uint32_t al, uint32_t sz) { (void)arg; return memalign(al < 16 ? 16 : al, sz); }
 static void a_free(void *arg, void *p) { (void)arg; free(p); }
 // i fotogrammi li scrive il decodificatore hardware: serve memoria CDRAM visibile al GPU (come negli esempi di SceAvPlayer)
+static unsigned alloc_fail, alloc_ok, alloc_last_fail;
 static struct { void *base; SceUID uid; } tex_blk[24];
 static void *t_alloc(void *arg, uint32_t al, uint32_t sz) {
   (void)arg; (void)al; sz = (sz + 0x3FFFF) & ~0x3FFFFu;
-  SceUID u = sceKernelAllocMemBlock("avp_frame", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, sz, NULL); if (u < 0) return NULL;
+  SceUID u = sceKernelAllocMemBlock("avp_frame", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, sz, NULL); if (u < 0) { alloc_fail++; alloc_last_fail = sz; return NULL; }
   void *b = NULL; if (sceKernelGetMemBlockBase(u, &b) < 0 || !b) { sceKernelFreeMemBlock(u); return NULL; }
   sceGxmMapMemory(b, sz, SCE_GXM_MEMORY_ATTRIB_READ);
-  for (int i = 0; i < 24; i++) if (!tex_blk[i].base) { tex_blk[i].base = b; tex_blk[i].uid = u; return b; }
+  for (int i = 0; i < 24; i++) if (!tex_blk[i].base) { tex_blk[i].base = b; tex_blk[i].uid = u; alloc_ok++; return b; }
   sceGxmUnmapMemory(b); sceKernelFreeMemBlock(u); return NULL;
 }
 static void t_free(void *arg, void *p) {
@@ -60,7 +61,7 @@ int player_open(const char *path, int loop) {
   h = sceAvPlayerInit(&d); if (!h || ((unsigned)h >> 16) == 0x806A) { int er = (int)h; h = 0; return er ? er : -1; }   // l'handle e' un puntatore (anche con il bit alto acceso): errori solo 0 e 0x806Axxxx
   int ar = sceAvPlayerAddSource(h, path); if (ar < 0) { sceAvPlayerClose(h); h = 0; return ar; }
   sceAvPlayerSetLooping(h, loop ? 1 : 0);
-  frames_seen = 0; seen_active = 0; open_at = sceKernelGetProcessTimeWide(); open_ok = 1; running = 1; audio_thr_on = pthread_create(&audio_thr, NULL, audio_loop, NULL) == 0;
+  alloc_ok = alloc_fail = 0; frames_seen = 0; seen_active = 0; open_at = sceKernelGetProcessTimeWide(); open_ok = 1; running = 1; audio_thr_on = pthread_create(&audio_thr, NULL, audio_loop, NULL) == 0;
   return 0;
 }
 
@@ -101,3 +102,4 @@ int player_ended(void) {
 }
 void player_size(unsigned *w, unsigned *h2) { *w = tex_w; *h2 = tex_h; }
 void player_audio_diag(char *out, int n) { snprintf(out, n, "audio: frames=%u ch=%d rate=%d size=%d grain=%d porta=%d", a_frames, a_ch, a_rate, a_size, a_grain, a_open_rc); }
+void player_video_diag(char *out, int n) { snprintf(out, n, "memoria fotogrammi: ok=%u fallite=%u (ultima %u byte) attivo=%d", alloc_ok, alloc_fail, alloc_last_fail, open_ok ? sceAvPlayerIsActive(h) : -1); }

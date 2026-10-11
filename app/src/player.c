@@ -26,7 +26,7 @@ static void *audio_loop(void *arg) {
   return NULL;
 }
 
-int player_open(const char *path) {
+int player_open(const char *path, int loop) {
   player_close();
   sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
   SceAvPlayerInitData d; memset(&d, 0, sizeof d);
@@ -34,7 +34,7 @@ int player_open(const char *path) {
   d.basePriority = 0xA0; d.numOutputVideoFrameBuffers = 3; d.autoStart = 1; d.debugLevel = 0;
   h = sceAvPlayerInit(&d); if (h <= 0) { int er = (int)h; h = 0; return er ? er : -1; }
   int ar = sceAvPlayerAddSource(h, path); if (ar < 0) { sceAvPlayerClose(h); h = 0; return ar; }
-  sceAvPlayerSetLooping(h, 1);
+  sceAvPlayerSetLooping(h, loop ? 1 : 0);
   open_ok = 1; running = 1; audio_thr_on = pthread_create(&audio_thr, NULL, audio_loop, NULL) == 0;
   return 0;
 }
@@ -66,3 +66,6 @@ vita2d_texture *player_frame(void) {
   }
   return tex;
 }
+
+unsigned long long player_time_ms(void) { return open_ok ? (unsigned long long)sceAvPlayerCurrentTime(h) : 0; }
+int player_ended(void) { return open_ok && !sceAvPlayerIsActive(h); }

@@ -740,16 +740,28 @@ static void start_prep(const char *jid, const char *id, const char *kind, const 
   pthread_mutex_lock(&mu); xfer.active = 1; xfer.cancel = 0; xfer.done = xfer.total = 0; xfer.title[0] = 0; xfer.phase[0] = 0; pthread_mutex_unlock(&mu);   // l'overlay compare subito
 }
 static int vp_touched;
-static void vp_stop(void) { if (vp.key[0]) { vp.gen++; vp.key[0] = 0; vp.state = 0; } player_close(); }
+static void vp_stop(void);
+static void vp_stop(void) { if (vp.key[0]) { vp.gen++; vp.key[0] = 0; vp.state = 0; } vp.audio = 0; player_close(); }
 static void vp_want(const char *jid, const char *id) {
-  vp_touched = 1; char k[260]; snprintf(k, sizeof k, "%s|%s", jid, id);
+  vp_touched = 1; if (vp.audio && vp.key[0]) vp_stop();  /* un video prende il posto di un audio in corso */ char k[260]; snprintf(k, sizeof k, "%s|%s", jid, id);
   if (strcmp(k, vp.key)) {
     player_close(); snprintf(vp.key, sizeof vp.key, "%s", k); vp.gen++; vp.state = 1; vp.pct = 0; vp.phase = 0; vp.opened = 0;
-    char cf[300]; SceIoStat st; vp_cachefile(id, cf, sizeof cf);
+    char cf[300]; SceIoStat st; vp_cachefile(id, vp.audio, cf, sizeof cf);
     if (sceIoGetstat(cf, &st) >= 0 && st.st_size > 0) { snprintf(vp.path, sizeof vp.path, "%s", cf); vp.state = 2; }
-    else { Job *j = job_new(J_VPREP, jid); if (j) { snprintf(j->id, sizeof j->id, "%s", id); snprintf(j->extra, sizeof j->extra, "%d", vp.gen); job_commit(); } else vp.state = 3; }
+    else { Job *j = job_new(J_VPREP, jid); if (j) { snprintf(j->id, sizeof j->id, "%s", id); snprintf(j->kind, sizeof j->kind, "%s", vp.audio ? "audio" : "video"); snprintf(j->extra, sizeof j->extra, "%d", vp.gen); job_commit(); } else vp.state = 3; }
   }
-  if (vp.state == 2 && !vp.opened) { vp.opened = 1; int pr = player_open(vp.path); crumb("lettore: apertura %s -> 0x%x", vp.path, (unsigned)pr); if (pr != 0) vp.state = 3; }
+  if (vp.state == 2 && !vp.opened) { vp.opened = 1; int pr = player_open(vp.path, !vp.audio); crumb("lettore: apertura %s -> 0x%x", vp.path, (unsigned)pr); if (pr != 0) vp.state = 3; }
+}
+// audio in chat: un tocco avvia (dopo la conversione in MP3 sul bridge), un altro tocco ferma
+static void aud_toggle(const char *jid, const char *id) {
+  char k[260]; snprintf(k, sizeof k, "%s|%s", jid, id);
+  if (vp.audio && !strcmp(k, vp.key)) { vp_stop(); return; }   // gia' in corso: ferma
+  vp_stop(); vp.audio = 1; vp_want(jid, id); vp.audio = 1; vp_touched = 0;
+}
+static int aud_state(const char *jid, const char *id, int *pct, int *secs) {
+  if (!vp.audio || !vp.key[0]) return 0; char k[260]; snprintf(k, sizeof k, "%s|%s", jid, id); if (strcmp(k, vp.key)) return 0;
+  *pct = vp.pct; *secs = (int)(player_time_ms() / 1000);
+  return vp.state == 3 ? 3 : vp.state == 2 ? 2 : 1;
 }
 // disegna il video (o lo stato della preparazione) nel riquadro; 1 se si vede il filmato
 static int vp_draw(float x, float y, float w, float h) {
@@ -762,7 +774,8 @@ static int vp_draw(float x, float y, float w, float h) {
   return 0;
 }
 static void draw_xfer_overlay(void) {
-  if (!vp_touched) vp_stop(); vp_touched = 0;
+  if (vp.audio && (screen != S_CHAT || (vp.state == 2 && player_ended()))) vp_stop();
+  if (!vp_touched && !vp.audio) vp_stop(); vp_touched = 0;
   if (!xfer.active) return;
   char title[80], phase[96]; pthread_mutex_lock(&mu); snprintf(title, sizeof title, "%s", xfer.title); snprintf(phase, sizeof phase, "%s", xfer.phase); unsigned long long done = xfer.done, total = xfer.total; pthread_mutex_unlock(&mu);
   vita2d_draw_rectangle(0, 0, SW, SH, C_BG); btn(0, 0, SW, SH, B_UPD_BLOCK, 0);

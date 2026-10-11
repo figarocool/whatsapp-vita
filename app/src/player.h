@@ -1,7 +1,9 @@
 // Lettore video/audio interno (SceAvPlayer del sistema): riproduce MP4 H.264/AAC gia' convertiti per la Vita.
 #pragma once
 #include <vita2d.h>
-int player_open(const char *path);   // 0 ok
+int player_open(const char *path, int loop);   // 0 ok
+unsigned long long player_time_ms(void);   // posizione di riproduzione
+int player_ended(void);   // 1 se la riproduzione (senza loop) e' finita
 void player_close(void);
 int player_active(void);
 // da chiamare a ogni frame: aggiorna l'immagine; ritorna la texture corrente (o NULL se non c'e' ancora un fotogramma)

@@ -161,9 +161,10 @@ static struct { volatile int active, cancel; char title[80], phase[96]; volatile
 static void xfer_phase(const char *ph) { pthread_mutex_lock(&mu); snprintf(xfer.phase, sizeof xfer.phase, "%s", ph); pthread_mutex_unlock(&mu); }
 static int xfer_dl_cb(unsigned long long done, unsigned long long total) { xfer.done = done; xfer.total = total; return xfer.cancel; }
 // anteprima video in-app (storie e chat): il bridge converte, l'app scarica in cache e lo riproduce con SceAvPlayer
-static struct { char key[260]; char path[300]; volatile int gen, state, pct, phase, opened; } vp;   // state: 0 niente, 1 preparo, 2 pronto, 3 errore; phase: 0 WhatsApp, 1 conversione, 2 download
+static struct { char key[260]; char path[300]; volatile int gen, state, pct, phase, opened, audio; } vp;
+static void aud_toggle(const char *jid, const char *id); static int aud_state(const char *jid, const char *id, int *pct, int *secs);   // audio in chat (in extra.inc)   // state: 0 niente, 1 preparo, 2 pronto, 3 errore; phase: 0 WhatsApp, 1 conversione, 2 download
 static int vp_dl_cb(unsigned long long done, unsigned long long total) { vp.pct = total ? (int)(100 * done / total) : 0; return 0; }
-static void vp_cachefile(const char *id, char *out, size_t n) { char s[48]; snprintf(s, sizeof s, "%.40s", id); for (char *p = s; *p; p++) if (*p == '/' || *p == ':' || *p == '\\' || *p == '=') *p = '_'; snprintf(out, n, "ux0:data/whatsapp/cache/V_%s.mp4", s); }
+static void vp_cachefile(const char *id, int audio, char *out, size_t n) { char s[48]; snprintf(s, sizeof s, "%.40s", id); for (char *p = s; *p; p++) if (*p == '/' || *p == ':' || *p == '\\' || *p == '=') *p = '_'; snprintf(out, n, "ux0:data/whatsapp/cache/V_%s.%s", s, audio ? "mp3" : "mp4"); }
 static void vp_cache_wipe(void) { SceUID d = sceIoDopen("ux0:data/whatsapp/cache"); if (d < 0) return; SceIoDirent e; while (sceIoDread(d, &e) > 0) { char p[300]; snprintf(p, sizeof p, "ux0:data/whatsapp/cache/%s", e.d_name); if (!strncmp(e.d_name, "V_", 2)) sceIoRemove(p); } sceIoDclose(d); }
 #define MAXJOBS 8
 static Job jobs[MAXJOBS]; static int njobs;
@@ -359,8 +360,8 @@ static void run_job(Job *j, const char *base) {
     }
     case J_VPREP: {
       int gen = atoi(j->extra); char e[500], e2b[200], key[64] = "", cf[300], part[310];
-      url_enc(j->jid, e, sizeof e); url_enc(j->id, e2b, sizeof e2b); vp_cachefile(j->id, cf, sizeof cf); snprintf(part, sizeof part, "%s.part", cf);
-      snprintf(url, sizeof url, "%s/prep/%s/%s?kind=video", base, e, e2b);
+      url_enc(j->jid, e, sizeof e); url_enc(j->id, e2b, sizeof e2b); vp_cachefile(j->id, !strcmp(j->kind, "audio"), cf, sizeof cf); snprintf(part, sizeof part, "%s.part", cf);
+      snprintf(url, sizeof url, "%s/prep/%s/%s?kind=%s", base, e, e2b, !strcmp(j->kind, "audio") ? "audio" : "video");
       { char *r = NULL; size_t rl = 0; int rc = http_get_t(url, &r, &rl, 20); jv *v = (rc == 0 && r) ? json_parse(r) : NULL; free(r); if (v) { snprintf(key, sizeof key, "%s", json_str(v, "key", "")); json_free(v); } }
       if (!key[0]) { if (gen == vp.gen) vp.state = 3; break; }
       int ready = 0; unsigned long long t0 = sceKernelGetProcessTimeWide();
@@ -1404,8 +1405,9 @@ int main(void) {
             btn((int)cx0, (int)cy, m->w - 2 * pad, HDOC, B_MSG, i + 1000); cy += HDOC + 4;
           }
           if (m->kind == K_VOICE || m->kind == K_AUDIO) {
-            vita2d_draw_fill_circle(cx0 + 20, cy + 21, 18, C_GREEN); text((int)cx0 + 15, (int)cy + 8, C_WHITE, 22, ">");
-            vita2d_draw_rectangle(cx0 + 50, cy + 20, m->w - 2 * pad - 60, 3, C_SUB);
+            int apct = 0, asec = 0, ast = aud_state(chats[cur_chat].jid, m->id, &apct, &asec);   // 0 fermo, 1 preparo, 2 in riproduzione, 3 errore
+            vita2d_draw_fill_circle(cx0 + 20, cy + 21, 18, ast == 3 ? C_RED : C_GREEN); text((int)cx0 + 15, (int)cy + 8, C_WHITE, 22, ast == 2 ? "||" : ast == 1 ? "..." : ">");
+            { float tw_ = m->w - 2 * pad - 60; vita2d_draw_rectangle(cx0 + 50, cy + 20, tw_, 3, C_SUB); if (ast == 2 && m->dur > 0) { float f = (float)asec / m->dur; if (f > 1) f = 1; vita2d_draw_rectangle(cx0 + 50, cy + 20, tw_ * f, 3, C_GREEN); } else if (ast == 1) vita2d_draw_rectangle(cx0 + 50, cy + 20, tw_ * apct / 100.0f, 3, C_GREEN); }
             char du[24]; snprintf(du, sizeof du, "%d:%02d", m->dur / 60, m->dur % 60); text((int)cx0 + 50, (int)cy + 26, C_SUB, 13, du); cy += HVOICE + 2;
           }
           for (int k = 0; k < m->nlines; k++) text((int)(bx + pad), (int)(cy + k * LH), m->kind == K_DELETED ? C_SUB : C_TEXT, BFONT, m->lines[k]);
@@ -1609,7 +1611,7 @@ int main(void) {
       case B_CHIP: filter_sel = arg; list_scroll = 0; break;
       case B_PROFILE: screen = S_PROFILE; break;
       case B_BACK: if (extra_back()) break; if (screen == S_CHAT) close_chat(); else if (screen == S_PROFILE) screen = S_LIST; else if (screen == S_PICKER) { if (pick_dir[0]) pick_up(); else screen = (pick_mode == 1 ? S_PROFILE : pick_mode == 2 ? S_UPDATES : S_CHAT); } break;
-      case B_MSG: if (arg >= 1000 && arg - 1000 < nmsgs) { Msg *m = &msgs[arg - 1000]; if ((m->kind == K_DOC || m->kind == K_AUDIO || m->kind == K_VOICE) && cur_chat >= 0) start_prep(chats[cur_chat].jid, m->id, m->kind == K_DOC ? "file" : "audio", m->fname); else { viewer_open = 1; view_is_video = m->kind == K_VIDEO; snprintf(view_key_id, sizeof view_key_id, "%s", m->id); snprintf(view_jid, sizeof view_jid, "%s", chats[cur_chat].jid); } } break;
+      case B_MSG: if (arg >= 1000 && arg - 1000 < nmsgs) { Msg *m = &msgs[arg - 1000]; if ((m->kind == K_DOC) && cur_chat >= 0) start_prep(chats[cur_chat].jid, m->id, "file", m->fname); else if ((m->kind == K_AUDIO || m->kind == K_VOICE) && cur_chat >= 0) aud_toggle(chats[cur_chat].jid, m->id); else { viewer_open = 1; view_is_video = m->kind == K_VIDEO; snprintf(view_key_id, sizeof view_key_id, "%s", m->id); snprintf(view_jid, sizeof view_jid, "%s", chats[cur_chat].jid); } } break;
       case B_VIEW_CLOSE: if (vz > 1.01f) { vz = 1; vpx = vpy = 0; } else viewer_open = 0; break;
       case B_MENU_CLOSE: menu_open = 0; break;
       case B_MENU_REACT: { Msg *m = find_msg(menu_id); if (m && cur_chat >= 0) { Job *j = job_new(J_REACT, chats[cur_chat].jid); if (j) { snprintf(j->id, sizeof j->id, "%s", m->id); char tmp[16] = ""; append_cp(tmp, sizeof tmp, QUICK[arg]); snprintf(j->text, sizeof j->text, "%s", tmp); job_commit(); } } menu_open = 0; break; }

@@ -356,7 +356,7 @@ try { const fl = fs.readdirSync(MEDIA_DIR).map((f) => [f, fs.statSync(path.join(
 const mediaFile = (k) => path.join(MEDIA_DIR, require('crypto').createHash('sha1').update(k).digest('hex'));
 // ---------- video: conversione nel formato che la Vita legge (H.264 Main 3.1, max 640 px, AAC stereo) ----------
 const VIDEO_DIR = path.join(DATA, 'videocache'); fs.mkdirSync(VIDEO_DIR, { recursive: true });
-try { const fl = fs.readdirSync(VIDEO_DIR).map((f) => [f, fs.statSync(path.join(VIDEO_DIR, f)).mtimeMs]).sort((a, b) => a[1] - b[1]); for (const [f] of fl.slice(0, Math.max(0, fl.length - 25))) fs.unlinkSync(path.join(VIDEO_DIR, f)); } catch (_) {}
+try { const fl = fs.readdirSync(VIDEO_DIR).map((f) => { const st = fs.statSync(path.join(VIDEO_DIR, f)); return [f, st.mtimeMs, st.size]; }).sort((a, b) => b[1] - a[1]); let tot = 0; for (const [f, , sz] of fl) { tot += sz; if (tot > 3e9) fs.unlinkSync(path.join(VIDEO_DIR, f)); } } catch (_) {}   // video/audio convertiti: si tengono finche' stanno in 3 GB, si butta il piu' vecchio
 const converting = new Map();
 function convertForVita(jid, id) {
   const key = require('crypto').createHash('sha1').update(jid + '|' + id).digest('hex'); const out = path.join(VIDEO_DIR, key + '.mp4');

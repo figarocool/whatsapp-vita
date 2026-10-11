@@ -165,7 +165,14 @@ static struct { char key[260]; char path[300]; volatile int gen, state, pct, pha
 static void aud_toggle(const char *jid, const char *id); static int aud_state(const char *jid, const char *id, int *pct, int *secs);   // audio in chat (in extra.inc)   // state: 0 niente, 1 preparo, 2 pronto, 3 errore; phase: 0 WhatsApp, 1 conversione, 2 download
 static int vp_dl_cb(unsigned long long done, unsigned long long total) { vp.pct = total ? (int)(100 * done / total) : 0; return 0; }
 static void vp_cachefile(const char *id, int audio, char *out, size_t n) { char s[48]; snprintf(s, sizeof s, "%.40s", id); for (char *p = s; *p; p++) if (*p == '/' || *p == ':' || *p == '\\' || *p == '=') *p = '_'; snprintf(out, n, "ux0:data/whatsapp/cache/V_%s.%s", s, audio ? "mp3" : "mp4"); }
-static void vp_cache_wipe(void) { SceUID d = sceIoDopen("ux0:data/whatsapp/cache"); if (d < 0) return; SceIoDirent e; while (sceIoDread(d, &e) > 0) { char p[300]; snprintf(p, sizeof p, "ux0:data/whatsapp/cache/%s", e.d_name); if (!strncmp(e.d_name, "V_", 2)) sceIoRemove(p); } sceIoDclose(d); }
+// la cache dei video/audio resta fra un avvio e l'altro: si cancella solo il piu' vecchio quando supera 150 MB
+static void vp_cache_wipe(void) {
+  for (int round = 0; round < 200; round++) {
+    SceUID d = sceIoDopen("ux0:data/whatsapp/cache"); if (d < 0) return; SceIoDirent e; long long tot = 0; char oldest[300] = ""; unsigned long long ot = ~0ULL;
+    while (sceIoDread(d, &e) > 0) { if (strncmp(e.d_name, "V_", 2)) continue; tot += e.d_stat.st_size; unsigned long long t = (unsigned long long)e.d_stat.st_mtime.year * 400ULL * 86400 + (unsigned long long)e.d_stat.st_mtime.month * 32 * 86400 + (unsigned long long)e.d_stat.st_mtime.day * 86400 + e.d_stat.st_mtime.hour * 3600 + e.d_stat.st_mtime.minute * 60 + e.d_stat.st_mtime.second; if (t < ot) { ot = t; snprintf(oldest, sizeof oldest, "ux0:data/whatsapp/cache/%s", e.d_name); } }
+    sceIoDclose(d); if (tot <= 150LL * 1024 * 1024 || !oldest[0]) return; sceIoRemove(oldest);
+  }
+}
 #define MAXJOBS 8
 static Job jobs[MAXJOBS]; static int njobs;
 

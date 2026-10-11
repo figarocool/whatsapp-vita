@@ -1244,18 +1244,18 @@ int main(void) {
     SceTouchData td; sceTouchPeek(SCE_TOUCH_PORT_FRONT, &td, 1);
     int tap = 0, lp = 0; float tapx = 0, tapy = 0;
     if (!ime_active) {
-      if (viewer_open) {   // visualizzatore: pizzico con due dita = zoom, un dito (con zoom) = sposta, tocco = chiudi / torna a zoom 1
+      if (viewer_open || (screen == S_STATUSVIEW && st_img_view && !popup_open)) {   // visualizzatore: pizzico con due dita = zoom, un dito (con zoom) = sposta, tocco = chiudi / torna a zoom 1
         touching = 0;
         if (td.reportNum >= 2) {
           float x0 = td.report[0].x / 2.0f, y0 = td.report[0].y / 2.0f, x1 = td.report[1].x / 2.0f, y1 = td.report[1].y / 2.0f;
           float d = hypotf(x1 - x0, y1 - y0), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
           if (!vpinch) { vpinch = 1; vd0 = d > 1 ? d : 1; vz0 = vz; vcx0 = cx; vcy0 = cy; vpx0 = vpx; vpy0 = vpy; }
-          else { vz = vz0 * d / vd0; if (vz < 1) vz = 1; if (vz > 6) vz = 6; vpx = vpx0 + (cx - vcx0) / UK; vpy = vpy0 + (cy - vcy0) / UK; }
+          else { vz = vz0 * d / vd0; if (vz < 0.4f) vz = 0.4f; if (vz > 6) vz = 6; vpx = vpx0 + (cx - vcx0) / UK; vpy = vpy0 + (cy - vcy0) / UK; }
           vmoved = 1; vtouch = 1;
         } else if (td.reportNum == 1) {
           float x = td.report[0].x / 2.0f, y = td.report[0].y / 2.0f;
           if (!vtouch) { vtouch = 1; vmoved = 0; vsx = x; vsy = y; vlx = x; vly = y; }
-          else { if (fabsf(x - vsx) > 10 || fabsf(y - vsy) > 10) vmoved = 1; if (vz > 1.01f && !vpinch && vmoved) { vpx += (x - vlx) / UK; vpy += (y - vly) / UK; } vlx = x; vly = y; }
+          else { if (fabsf(x - vsx) > 10 || fabsf(y - vsy) > 10) vmoved = 1; if (fabsf(vz - 1) > 0.01f && !vpinch && vmoved) { vpx += (x - vlx) / UK; vpy += (y - vly) / UK; } vlx = x; vly = y; }
         } else if (vtouch) {
           vtouch = 0; if (!vmoved && !vpinch) { tap = 1; tapx = vsx; tapy = vsy; } vpinch = 0; vmoved = 0;
         }
@@ -1638,7 +1638,7 @@ int main(void) {
       case B_PROFILE: screen = S_PROFILE; break;
       case B_BACK: if (extra_back()) break; if (screen == S_CHAT) close_chat(); else if (screen == S_PROFILE) screen = S_LIST; else if (screen == S_PICKER) { if (pick_dir[0]) pick_up(); else screen = (pick_mode == 1 ? S_PROFILE : pick_mode == 2 ? S_UPDATES : S_CHAT); } break;
       case B_MSG: if (arg >= 1000 && arg - 1000 < nmsgs) { Msg *m = &msgs[arg - 1000]; if ((m->kind == K_DOC) && cur_chat >= 0) start_prep(chats[cur_chat].jid, m->id, "file", m->fname); else if ((m->kind == K_AUDIO || m->kind == K_VOICE) && cur_chat >= 0) aud_toggle(chats[cur_chat].jid, m->id); else { viewer_open = 1; view_is_video = m->kind == K_VIDEO; snprintf(view_key_id, sizeof view_key_id, "%s", m->id); snprintf(view_jid, sizeof view_jid, "%s", chats[cur_chat].jid); } } break;
-      case B_VIEW_CLOSE: if (vz > 1.01f) { vz = 1; vpx = vpy = 0; } else viewer_open = 0; break;
+      case B_VIEW_CLOSE: if (vz > 1.01f || vz < 0.99f) { vz = 1; vpx = vpy = 0; } else viewer_open = 0; break;
       case B_MENU_CLOSE: menu_open = 0; break;
       case B_MENU_REACT: { Msg *m = find_msg(menu_id); if (m && cur_chat >= 0) { Job *j = job_new(J_REACT, chats[cur_chat].jid); if (j) { snprintf(j->id, sizeof j->id, "%s", m->id); char tmp[16] = ""; append_cp(tmp, sizeof tmp, QUICK[arg]); snprintf(j->text, sizeof j->text, "%s", tmp); job_commit(); } } menu_open = 0; break; }
       case B_MENU_ITEM: { Msg *m = find_msg(menu_id); if (m && cur_chat >= 0) {

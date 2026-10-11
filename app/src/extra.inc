@@ -9,6 +9,7 @@ static float misc_scroll, misc_vel;
 static void query2(const char *tag, const char *path); static unsigned my_q_frame; static jv *qres2_arr(const char *tag);
 static char view_jid[160]; static int view_is_video;
 static void vp_want(const char *jid, const char *id); static int vp_draw(float x, float y, float w, float h);
+static int st_img_view;   // 1 mentre si guarda un'immagine di una storia (abilita pizzico e trascinamento)
 static char search_q[120], search_scope[160]; static int search_from = S_LIST;
 static char nc_number[40]; static int nc_check; static char open_after[160]; static int open_after_t;
 static char comm_sel[160], comm_name_tmp[120]; static int comm_sel_idx; static unsigned comm_refresh_at;
@@ -197,7 +198,16 @@ static void draw_statusview(void) {
   vita2d_draw_rectangle(0, 0, SW, SH, img ? RGBA8(0, 0, 0, 255) : hash_col(nm));
   if (img) {
     Media *md = media_get("status@broadcast", id);
-    if (md && md->tex) { float w0 = vita2d_texture_get_width(md->tex), h0 = vita2d_texture_get_height(md->tex); float s = fminf((SW - 40) / w0, (SH - 170) / h0); vita2d_draw_texture_scale(md->tex, (SW - w0 * s) / 2, 80 + (SH - 170 - h0 * s) / 2, s, s); }
+    { static char zid[64]; if (strcmp(zid, id)) { snprintf(zid, sizeof zid, "%s", id); vz = 1; vpx = vpy = 0; } }   // ogni storia riparte adattata allo schermo
+    st_img_view = strcmp(kind, "video") != 0;
+    if (md && !strcmp(kind, "image") && md->tex && md->bstate == 0) md->bstate = 4;   // versione grande per vederla nitida a tutto schermo
+    vita2d_texture *it_ = md ? (md->big ? md->big : md->tex) : NULL;
+    if (it_) {
+      float w0 = vita2d_texture_get_width(it_), h0 = vita2d_texture_get_height(it_); float s = fminf(SW / w0, SH / h0) * vz, w = w0 * s, h = h0 * s;
+      if (w > SW) { float mx = (w - SW) / 2; if (vpx > mx) vpx = mx; if (vpx < -mx) vpx = -mx; } else vpx = 0;
+      if (h > SH) { float my_ = (h - SH) / 2; if (vpy > my_) vpy = my_; if (vpy < -my_) vpy = -my_; } else vpy = 0;
+      vita2d_draw_texture_scale(it_, SW / 2.0f + vpx - w / 2, SH / 2.0f + vpy - h / 2, s, s);
+    }
     else text(SW / 2 - 40, SH / 2 - 10, C_SUB, 20, md && md->state == 2 ? T("Errore") : "...");
     if (!strcmp(kind, "video")) { vp_want("status@broadcast", id); vp_draw(0, 0, SW, SH); }
     if (txt[0]) { vita2d_draw_rectangle(0, SH - 90, SW, 90, RGBA8(0, 0, 0, 150)); wrap_text(txt, 40, SH - 78, SW - 80, 20, C_WHITE, 26, 1); }
@@ -375,18 +385,18 @@ static void draw_viewer(void) {
   vita2d_texture *vt = md ? (md->big ? md->big : md->tex) : NULL;
   if (vt) {
     float tw0 = vita2d_texture_get_width(vt), th0 = vita2d_texture_get_height(vt);
-    float s = fminf((SW - 40) / tw0, (SH - 140) / th0) * vz, w = tw0 * s, h = th0 * s;
-    float ccx = SW / 2.0f, ccy = 36 + (SH - 140) / 2.0f;
+    float s = fminf(SW / tw0, SH / th0) * vz, w = tw0 * s, h = th0 * s;   // si parte adattata a tutto lo schermo; si puo' rimpicciolire o ingrandire
+    float ccx = SW / 2.0f, ccy = SH / 2.0f;
     if (w > SW) { float mx = (w - SW) / 2; if (vpx > mx) vpx = mx; if (vpx < -mx) vpx = -mx; } else vpx = 0;   // non si esce dai bordi dello schermo
     if (h > SH) { float hi = h / 2 - ccy, lo = SH - ccy - h / 2; if (vpy > hi) vpy = hi; if (vpy < lo) vpy = lo; } else vpy = 0;
-    if (vz <= 1.01f) { vpx = 0; vpy = 0; }
+    if (vz <= 1.01f) { vpx = 0; vpy = 0; }   // (sotto 1 resta centrata)
     vita2d_draw_texture_scale(vt, ccx + vpx - w / 2, ccy + vpy - h / 2, s / 1.0f, s / 1.0f);
-    if (md && !md->big && (md->bstate == 4 || md->bstate == 3)) text(SW / 2 - 70, 36 + (SH - 140) / 2.0f - 10, RGBA8(210, 210, 210, 255), 16, T("Carico la foto..."));
+    if (md && !md->big && (md->bstate == 4 || md->bstate == 3)) text(SW / 2 - 70, SH / 2 - 10, RGBA8(210, 210, 210, 255), 16, T("Carico la foto..."));
   }
-  if (view_is_video) { vp_want(view_jid, view_key_id); vp_draw(0, 0, SW, SH - 70); }
+  if (view_is_video) { vp_want(view_jid, view_key_id); vp_draw(0, 0, SW, SH); }
   btn(0, 0, SW, SH, B_VIEW_CLOSE, 0);
   { const char *lab[3] = { view_is_video ? T("Salva video") : T("Salva foto"), T("Rispondi"), T("Reagisci") }; int ids[3] = { B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT }; int gap = 10, bw = (SW - 4 * gap) / 3; if (bw > 210) bw = 210; int x0 = (SW - 3 * bw - 2 * gap) / 2;
-    for (int i = 0; i < 3; i++) { int bx = x0 + i * (bw + gap); rrect(bx, SH - 60, bw, 44, 22, RGBA8(40, 40, 40, 255)); text(bx + (bw - tw(18, lab[i])) / 2, SH - 49, C_WHITE, 18, lab[i]); btn(bx, SH - 60, bw, 44, ids[i], 0); } }
+    for (int i = 0; i < 3; i++) { int bx = x0 + i * (bw + gap); rrect(bx, SH - 60, bw, 44, 22, RGBA8(30, 30, 30, 205)); text(bx + (bw - tw(18, lab[i])) / 2, SH - 49, C_WHITE, 18, lab[i]); btn(bx, SH - 60, bw, 44, ids[i], 0); } }
   text(SW / 2 - 130, 14, RGBA8(200, 200, 200, 255), 15, T("Tocca fuori dai pulsanti o premi Cerchio per chiudere"));
 }
 
@@ -732,6 +742,7 @@ static void draw_lang(void) {
 
 // ---------- storie: avanti e indietro (tocco, L1/R1, croce) ----------
 static void st_step(int dir) {
+  if (vz > 1.01f || vz < 0.99f) { vz = 1; vpx = vpy = 0; return; }   // con zoom, il tocco riporta prima alla misura intera
   jv *a = qarr("updates"); jv *its = st_mine ? qres2_arr("mystatus") : (a && st_idx < a->count ? json_get(a->items[st_idx], "items") : NULL);
   if (dir < 0) {
     if (st_item > 0) st_item--;

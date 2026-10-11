@@ -44,7 +44,7 @@ http.createServer(async (req, res) => {
   if (p.startsWith('/presence/')) return send(res, 200, { state: 'composing' });
   if (p === '/profile') return send(res, 200, { jid: '39000@s.whatsapp.net', name: 'Io Stesso', about: 'Info di prova', phone: '393331234567' });
   if (p === '/updates') { const now = Math.floor(Date.now() / 1000); return send(res, 200, [
-    { jid: '39333111@s.whatsapp.net', name: 'Anna Rossi', items: [{ id: 'S1', kind: process.env.MOCK_MP4 ? 'video' : 'text', text: 'Buongiorno a tutti \u{1F31E}', ts: now - 3600 }, { id: 'S2', kind: 'image', text: 'La mia colazione', ts: now - 3000, w: 800, h: 600 }] },
+    { jid: '39333111@s.whatsapp.net', name: 'Anna Rossi', items: [{ id: 'S1', kind: process.env.MOCK_MP4 ? 'video' : process.env.MOCK_IMG ? 'image' : 'text', w: 600, h: 800, text: 'Buongiorno a tutti \u{1F31E}', ts: now - 3600 }, { id: 'S2', kind: 'image', text: 'La mia colazione', ts: now - 3000, w: 800, h: 600 }] },
     { jid: '39333222@s.whatsapp.net', name: 'Luca Bianchi con un nome molto lungo da troncare', items: [{ id: 'S3', kind: 'text', text: 'Auguri!', ts: now - 7200 }] },
     { jid: '39333333@s.whatsapp.net', name: 'Maria Verdi', items: [{ id: 'S4', kind: 'image', text: '', ts: now - 9000, w: 600, h: 800 }] }]); }
   if (p === '/mystatus') { const now = Math.floor(Date.now() / 1000); return send(res, 200, [{ id: 'M1', kind: 'text', text: 'La mia prima storia', ts: now - 5000, views: 3 }, { id: 'M2', kind: 'image', text: 'foto', ts: now - 2000, w: 800, h: 600, views: 1 }]); }

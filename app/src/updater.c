@@ -372,6 +372,16 @@ void upd_install(void) {
   UpdInfo s; upd_snapshot(&s); if (s.state != UPD_AVAILABLE) return;
   if (start_thread(install_thread, NULL) < 0) utrace("installazione: thread gia' in corso");
 }
+// Cancellazione dell'installatore a app gia' aperta e in uso (stesso codice che gira senza problemi durante gli aggiornamenti), in un thread a parte.
+#ifndef SAFE_BUILD
+static void *cleanup_thread(void *arg) { (void)arg; upd_cleanup_helper(); u_thread_running = 0; return NULL; }
+#endif
+void upd_cleanup_later(void) {
+#ifndef SAFE_BUILD
+  SceIoStat st; if (sceIoGetstat(HELPER_MARKER, &st) < 0 || upd_busy()) return;
+  if (start_thread(cleanup_thread, NULL) < 0) utrace("pulizia installatore: thread occupato, riprovo piu' tardi");
+#endif
+}
 void upd_note(const char *s) { utrace("%s", s); }   // riga nel registro degli aggiornamenti (anche prima che parta la grafica)
 void upd_init(void) {
   memset(&ui, 0, sizeof ui); ui.state = UPD_IDLE;

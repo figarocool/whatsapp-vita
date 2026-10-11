@@ -23,7 +23,8 @@ typedef struct {
 
 void upd_note(const char *s);      // scrive una riga in ux0:data/whatsapp/update.log
 void upd_init(void);               // legge la versione installata e ripulisce i resti di un aggiornamento precedente
-void upd_cleanup_helper(void);     // da chiamare PRIMA di aprire la grafica (carica moduli di sistema)
+void upd_cleanup_helper(void);     // cancella l'app installatrice (chiamata dal thread di pulizia e all'uscita)
+void upd_cleanup_later(void);      // la stessa cosa in un thread, a app gia' aperta     // da chiamare PRIMA di aprire la grafica (carica moduli di sistema)
 void upd_check(int manual);        // controllo in un thread; manual=1 mostra anche "gia' aggiornato" e gli errori
 void upd_install(void);            // scarica, verifica, prepara e avvia l'installazione (thread)
 void upd_cancel(void);

@@ -15,3 +15,9 @@ tools/emu_drive.py
 *.out
 release-out/
 app/build-release/
+
+# motore sperimentale
+engine/build/
+engine/js/node_modules/
+engine/js/engine.bundle.js
+engine/js/engine.min.js

@@ -1,0 +1,1 @@
+{"name":"vita-wa-engine-js","private":true,"type":"module","scripts":{"build":"node build.mjs"},"dependencies":{"buffer":"^6.0.3","esbuild":"^0.28.2","events":"^3.3.0","path-browserify":"^1.0.1","util":"^0.12.5"}}

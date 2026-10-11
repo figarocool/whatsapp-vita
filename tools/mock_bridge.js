@@ -44,7 +44,7 @@ http.createServer(async (req, res) => {
   if (p.startsWith('/presence/')) return send(res, 200, { state: 'composing' });
   if (p === '/profile') return send(res, 200, { jid: '39000@s.whatsapp.net', name: 'Io Stesso', about: 'Info di prova', phone: '393331234567' });
   if (p === '/updates') { const now = Math.floor(Date.now() / 1000); return send(res, 200, [
-    { jid: '39333111@s.whatsapp.net', name: 'Anna Rossi', items: [{ id: 'S1', kind: 'text', text: 'Buongiorno a tutti \u{1F31E}', ts: now - 3600 }, { id: 'S2', kind: 'image', text: 'La mia colazione', ts: now - 3000, w: 800, h: 600 }] },
+    { jid: '39333111@s.whatsapp.net', name: 'Anna Rossi', items: [{ id: 'S1', kind: process.env.MOCK_MP4 ? 'video' : 'text', text: 'Buongiorno a tutti \u{1F31E}', ts: now - 3600 }, { id: 'S2', kind: 'image', text: 'La mia colazione', ts: now - 3000, w: 800, h: 600 }] },
     { jid: '39333222@s.whatsapp.net', name: 'Luca Bianchi con un nome molto lungo da troncare', items: [{ id: 'S3', kind: 'text', text: 'Auguri!', ts: now - 7200 }] },
     { jid: '39333333@s.whatsapp.net', name: 'Maria Verdi', items: [{ id: 'S4', kind: 'image', text: '', ts: now - 9000, w: 600, h: 800 }] }]); }
   if (p === '/mystatus') { const now = Math.floor(Date.now() / 1000); return send(res, 200, [{ id: 'M1', kind: 'text', text: 'La mia prima storia', ts: now - 5000, views: 3 }, { id: 'M2', kind: 'image', text: 'foto', ts: now - 2000, w: 800, h: 600, views: 1 }]); }
@@ -52,7 +52,8 @@ http.createServer(async (req, res) => {
   if (p === '/calls' || p === '/communities') return send(res, 200, []);
   if (p.startsWith('/prep/')) { prepT0 = Date.now(); return send(res, 200, { key: 'mockkey' }); }
   if (p.startsWith('/prep-status/')) { const t = (Date.now() - prepT0) / 1000; return send(res, 200, t < 3 ? { state: 'download', pct: 0 } : t < 9 ? { state: 'convert', pct: Math.min(99, Math.round((t - 3) / 6 * 100)) } : { state: 'ready', pct: 100, size: 3000000 }); }
-  if (p.startsWith('/prep-file/')) { res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': 3000000 }); let sent = 0; const iv = setInterval(() => { const n = Math.min(100000, 3000000 - sent); res.write(Buffer.alloc(n, 7)); sent += n; if (sent >= 3000000) { clearInterval(iv); res.end(); } }, 150); return; }
+  if (p.startsWith('/prep-file/')) { if (process.env.MOCK_MP4) { const b = require('fs').readFileSync(process.env.MOCK_MP4); res.writeHead(200, { 'Content-Length': b.length }); return res.end(b); }
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': 3000000 }); let sent = 0; const iv = setInterval(() => { const n = Math.min(100000, 3000000 - sent); res.write(Buffer.alloc(n, 7)); sent += n; if (sent >= 3000000) { clearInterval(iv); res.end(); } }, 150); return; }
   if (p.startsWith('/read/') || p === '/events') return send(res, 200, { ok: true, seq: 0, events: [] });
   if (req.method === 'POST') { req.resume(); return send(res, 200, { ok: true }); }
   send(res, 404, { error: 'mock: non gestito ' + p });

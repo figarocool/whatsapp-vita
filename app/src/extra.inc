@@ -8,6 +8,7 @@
 static float misc_scroll, misc_vel;
 static void query2(const char *tag, const char *path); static unsigned my_q_frame; static jv *qres2_arr(const char *tag);
 static char view_jid[160]; static int view_is_video;
+static void vp_want(const char *jid, const char *id); static int vp_draw(float x, float y, float w, float h);
 static char search_q[120], search_scope[160]; static int search_from = S_LIST;
 static char nc_number[40]; static int nc_check; static char open_after[160]; static int open_after_t;
 static char comm_sel[160], comm_name_tmp[120]; static int comm_sel_idx; static unsigned comm_refresh_at;
@@ -187,6 +188,7 @@ static void draw_statusview(void) {
     Media *md = media_get("status@broadcast", id);
     if (md && md->tex) { float w0 = vita2d_texture_get_width(md->tex), h0 = vita2d_texture_get_height(md->tex); float s = fminf((SW - 40) / w0, (SH - 170) / h0); vita2d_draw_texture_scale(md->tex, (SW - w0 * s) / 2, 80 + (SH - 170 - h0 * s) / 2, s, s); }
     else text(SW / 2 - 40, SH / 2 - 10, C_SUB, 20, md && md->state == 2 ? T("Errore") : "...");
+    if (!strcmp(kind, "video")) { vp_want("status@broadcast", id); vp_draw(20, 80, SW - 40, SH - 170); }
     if (txt[0]) { vita2d_draw_rectangle(0, SH - 90, SW, 90, RGBA8(0, 0, 0, 150)); wrap_text(txt, 40, SH - 78, SW - 80, 20, C_WHITE, 26, 1); }
   } else wrap_text(txt, 80, 150, SW - 160, 32, C_WHITE, 42, 1);
   int n = its->count, seg = (SW - 40 - (n - 1) * 4) / n;
@@ -371,6 +373,7 @@ static void draw_viewer(void) {
     vita2d_draw_texture_scale(vt, ccx + vpx - w / 2, ccy + vpy - h / 2, s / 1.0f, s / 1.0f);
     if (md && !md->big && (md->bstate == 4 || md->bstate == 3)) text(SW / 2 - 70, 36 + (SH - 140) / 2.0f - 10, RGBA8(210, 210, 210, 255), 16, T("Carico la foto..."));
   }
+  if (view_is_video) { vp_want(view_jid, view_key_id); vp_draw(0, 36, SW, SH - 140); }
   btn(0, 0, SW, SH, B_VIEW_CLOSE, 0);
   { const char *lab[3] = { view_is_video ? T("Salva video") : T("Salva foto"), T("Rispondi"), T("Reagisci") }; int ids[3] = { B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT }; int gap = 10, bw = (SW - 4 * gap) / 3; if (bw > 210) bw = 210; int x0 = (SW - 3 * bw - 2 * gap) / 2;
     for (int i = 0; i < 3; i++) { int bx = x0 + i * (bw + gap); rrect(bx, SH - 60, bw, 44, 22, RGBA8(40, 40, 40, 255)); text(bx + (bw - tw(18, lab[i])) / 2, SH - 49, C_WHITE, 18, lab[i]); btn(bx, SH - 60, bw, 44, ids[i], 0); } }
@@ -736,7 +739,30 @@ static void start_prep(const char *jid, const char *id, const char *kind, const 
   snprintf(j->id, sizeof j->id, "%s", id); snprintf(j->kind, sizeof j->kind, "%s", kind); snprintf(j->text, sizeof j->text, "%s", fname ? fname : ""); job_commit();
   pthread_mutex_lock(&mu); xfer.active = 1; xfer.cancel = 0; xfer.done = xfer.total = 0; xfer.title[0] = 0; xfer.phase[0] = 0; pthread_mutex_unlock(&mu);   // l'overlay compare subito
 }
+static int vp_touched;
+static void vp_stop(void) { if (vp.key[0]) { vp.gen++; vp.key[0] = 0; vp.state = 0; } player_close(); }
+static void vp_want(const char *jid, const char *id) {
+  vp_touched = 1; char k[260]; snprintf(k, sizeof k, "%s|%s", jid, id);
+  if (strcmp(k, vp.key)) {
+    player_close(); snprintf(vp.key, sizeof vp.key, "%s", k); vp.gen++; vp.state = 1; vp.pct = 0; vp.phase = 0; vp.opened = 0;
+    char cf[300]; SceIoStat st; vp_cachefile(id, cf, sizeof cf);
+    if (sceIoGetstat(cf, &st) >= 0 && st.st_size > 0) { snprintf(vp.path, sizeof vp.path, "%s", cf); vp.state = 2; }
+    else { Job *j = job_new(J_VPREP, jid); if (j) { snprintf(j->id, sizeof j->id, "%s", id); snprintf(j->extra, sizeof j->extra, "%d", vp.gen); job_commit(); } else vp.state = 3; }
+  }
+  if (vp.state == 2 && !vp.opened) { vp.opened = 1; int pr = player_open(vp.path); crumb("lettore: apertura %s -> 0x%x", vp.path, (unsigned)pr); if (pr != 0) vp.state = 3; }
+}
+// disegna il video (o lo stato della preparazione) nel riquadro; 1 se si vede il filmato
+static int vp_draw(float x, float y, float w, float h) {
+  vita2d_texture *t = vp.state == 2 ? player_frame() : NULL;
+  if (t) { float tw0 = vita2d_texture_get_width(t), th0 = vita2d_texture_get_height(t), s = fminf(w / tw0, h / th0); vita2d_draw_texture_scale(t, x + (w - tw0 * s) / 2, y + (h - th0 * s) / 2, s, s); return 1; }
+  char b[96]; if (vp.state == 3) snprintf(b, sizeof b, "%s", T("Video non disponibile")); else if (vp.phase == 1) snprintf(b, sizeof b, "%s %d%%", T("Converto per la Vita"), vp.pct); else if (vp.phase == 2) snprintf(b, sizeof b, "%s %d%%", T("Scarico sulla Vita"), vp.pct); else snprintf(b, sizeof b, "%s", T("Scarico da WhatsApp"));
+  float bw = 360, bx = x + (w - bw) / 2, by = y + h / 2 + 30;
+  vita2d_draw_rectangle(bx - 30, by - 50, bw + 60, 96, RGBA8(0, 0, 0, 170)); text((int)(x + (w - tw(18, b)) / 2), (int)by - 38, C_WHITE, 18, b);
+  rrect(bx, by, bw, 12, 6, RGBA8(255, 255, 255, 70)); if (vp.state != 3 && vp.phase) { float f = vp.pct / 100.0f; if (f < 0.04f) f = 0.04f; rrect(bx, by, bw * f, 12, 6, C_GREEN2); }
+  return 0;
+}
 static void draw_xfer_overlay(void) {
+  if (!vp_touched) vp_stop(); vp_touched = 0;
   if (!xfer.active) return;
   char title[80], phase[96]; pthread_mutex_lock(&mu); snprintf(title, sizeof title, "%s", xfer.title); snprintf(phase, sizeof phase, "%s", xfer.phase); unsigned long long done = xfer.done, total = xfer.total; pthread_mutex_unlock(&mu);
   vita2d_draw_rectangle(0, 0, SW, SH, C_BG); btn(0, 0, SW, SH, B_UPD_BLOCK, 0);

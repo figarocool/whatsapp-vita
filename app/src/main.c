@@ -23,6 +23,7 @@
 #include <math.h>
 #include <jpeglib.h>
 #include "updater.h"
+#include "player.h"
 #include "i18n.h"
 #include <psp2/camera.h>
 #include <psp2/kernel/sysmem.h>
@@ -153,12 +154,17 @@ static volatile int quit_req;
 static volatile int chat_limit = 40, msg_limit = 30;   // caricamento a blocchi
 static int chat_logged_frames, older_pending, no_more_older; static char anchor_id[64]; static unsigned msgs_gen, gen_req;
 
-enum { J_SEND = 1, J_MEDIA, J_REACT, J_DELETE, J_PROFILE, J_PHOTO, J_DOWNLOAD, J_READ, J_QUERY, J_EXPORT, J_PREP };
+enum { J_SEND = 1, J_MEDIA, J_REACT, J_DELETE, J_PROFILE, J_PHOTO, J_DOWNLOAD, J_READ, J_QUERY, J_EXPORT, J_PREP, J_VPREP };
 typedef struct { int type; char jid[160]; char id[64]; char text[2100]; char path[300]; char kind[12]; char extra[64]; } Job;
 // trasferimenti con barra di avanzamento (video, audio, file): il thread di rete scrive, l'interfaccia disegna
 static struct { volatile int active, cancel; char title[80], phase[96]; volatile unsigned long long done, total; } xfer;
 static void xfer_phase(const char *ph) { pthread_mutex_lock(&mu); snprintf(xfer.phase, sizeof xfer.phase, "%s", ph); pthread_mutex_unlock(&mu); }
 static int xfer_dl_cb(unsigned long long done, unsigned long long total) { xfer.done = done; xfer.total = total; return xfer.cancel; }
+// anteprima video in-app (storie e chat): il bridge converte, l'app scarica in cache e lo riproduce con SceAvPlayer
+static struct { char key[260]; char path[300]; volatile int gen, state, pct, phase, opened; } vp;   // state: 0 niente, 1 preparo, 2 pronto, 3 errore; phase: 0 WhatsApp, 1 conversione, 2 download
+static int vp_dl_cb(unsigned long long done, unsigned long long total) { vp.pct = total ? (int)(100 * done / total) : 0; return 0; }
+static void vp_cachefile(const char *id, char *out, size_t n) { char s[48]; snprintf(s, sizeof s, "%.40s", id); for (char *p = s; *p; p++) if (*p == '/' || *p == ':' || *p == '\\' || *p == '=') *p = '_'; snprintf(out, n, "ux0:data/whatsapp/cache/V_%s.mp4", s); }
+static void vp_cache_wipe(void) { SceUID d = sceIoDopen("ux0:data/whatsapp/cache"); if (d < 0) return; SceIoDirent e; while (sceIoDread(d, &e) > 0) { char p[300]; snprintf(p, sizeof p, "ux0:data/whatsapp/cache/%s", e.d_name); if (!strncmp(e.d_name, "V_", 2)) sceIoRemove(p); } sceIoDclose(d); }
 #define MAXJOBS 8
 static Job jobs[MAXJOBS]; static int njobs;
 
@@ -350,6 +356,30 @@ static void run_job(Job *j, const char *base) {
       }
       xfer.active = 0;
       prep_done: break;
+    }
+    case J_VPREP: {
+      int gen = atoi(j->extra); char e[500], e2b[200], key[64] = "", cf[300], part[310];
+      url_enc(j->jid, e, sizeof e); url_enc(j->id, e2b, sizeof e2b); vp_cachefile(j->id, cf, sizeof cf); snprintf(part, sizeof part, "%s.part", cf);
+      snprintf(url, sizeof url, "%s/prep/%s/%s?kind=video", base, e, e2b);
+      { char *r = NULL; size_t rl = 0; int rc = http_get_t(url, &r, &rl, 20); jv *v = (rc == 0 && r) ? json_parse(r) : NULL; free(r); if (v) { snprintf(key, sizeof key, "%s", json_str(v, "key", "")); json_free(v); } }
+      if (!key[0]) { if (gen == vp.gen) vp.state = 3; break; }
+      int ready = 0; unsigned long long t0 = sceKernelGetProcessTimeWide();
+      while (!ready && gen == vp.gen && !quit_flag) {
+        if (sceKernelGetProcessTimeWide() - t0 > 600ULL * 1000000ULL) break;
+        snprintf(url, sizeof url, "%s/prep-status/%s", base, key); char *r = NULL; size_t rl = 0;
+        if (http_get_t(url, &r, &rl, 10) == 0 && r) { jv *v = json_parse(r); if (v) { const char *st = json_str(v, "state", "");
+          if (!strcmp(st, "ready")) ready = 1; else if (!strcmp(st, "error")) { json_free(v); free(r); if (gen == vp.gen) vp.state = 3; goto vprep_done; }
+          else if (!strcmp(st, "convert")) { vp.phase = 1; vp.pct = (int)json_num(v, "pct", 0); } else { vp.phase = 0; vp.pct = 0; }
+          json_free(v); } }
+        free(r); if (!ready) usleep(400000);
+      }
+      if (!ready || gen != vp.gen) { if (gen == vp.gen) vp.state = 3; break; }
+      vp.phase = 2; vp.pct = 0; sceIoMkdir("ux0:data/whatsapp", 0777); sceIoMkdir("ux0:data/whatsapp/cache", 0777);
+      snprintf(url, sizeof url, "%s/prep-file/%s", base, key);
+      if (http_download_file(url, part, 300, vp_dl_cb) != 0) { sceIoRemove(part); if (gen == vp.gen) vp.state = 3; break; }
+      sceIoRemove(cf); sceIoRename(part, cf);
+      if (gen == vp.gen) { snprintf(vp.path, sizeof vp.path, "%s", cf); vp.state = 2; }
+      vprep_done: break;
     }
     case J_QUERY: {
       char *resp = NULL; snprintf(url, sizeof url, "%s%s", base, j->path); int r;
@@ -1119,7 +1149,7 @@ int main(void) {
   { char d = '0'; SceUID tf = sceIoOpen("ux0:data/whatsapp/theme_ui.txt", SCE_O_RDONLY, 0); if (tf >= 0) { sceIoRead(tf, &d, 1); sceIoClose(tf); } apply_ui_theme(d == '1'); }   // predefinito: chiaro
   i18n_init();   // lingua scelta (o quella di sistema della Vita)
   upd_note("app: avvio (main)");   // primissima riga: se dopo un aggiornamento manca, l'app non e' nemmeno partita
-  upd_init(); upd_note("app: versione letta, avvio la grafica");
+  upd_init(); vp_cache_wipe(); upd_note("app: versione letta, avvio la grafica");
   vita2d_init_advanced(8 * 1024 * 1024); vita2d_set_clear_color(C_BG);   // memoria temporanea per frame: 8 MB (di default 1 MB: con l'interfaccia ingrandita poteva finire)
   pool_total = vita2d_pool_free_space();
   load_fonts();

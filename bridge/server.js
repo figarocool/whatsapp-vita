@@ -170,6 +170,7 @@ function addMessage(m, live) {
     if (!describe(m)) return;
     m.messageTimestamp = num(m.messageTimestamp);
     rawList(jid).set(m.key.id, m); dirtyChats.add(jid);
+    if (live && describe(m).kind === 'video' && !m.key.fromMe) bgPrep(jid, m.key.id);
     const sender = m.key.participant || m.participant; if (sender && m.pushName && !m.key.fromMe) pnames.set(norm(sender), m.pushName);
     return;
   }
@@ -183,6 +184,7 @@ function addMessage(m, live) {
   if (handleReaction(m) || handleProtocol(m)) return;
   const d = describe(m); if (!d) return;
   if (live && (d.kind === 'image' || d.kind === 'sticker')) prefetchMedia(jid, m.key.id);
+  if (live && d.kind === 'video') bgPrep(jid, m.key.id);
   const ts = num(m.messageTimestamp);
   const fromMe = !!m.key.fromMe;
   link(m.key.participant, m.key.participantAlt); link(jid, m.key.remoteJidAlt);
@@ -372,7 +374,7 @@ function convertForVita(jid, id) {
 // L'app avvia un lavoro (/prep), ne legge lo stato (/prep-status: scarico da WhatsApp, conversione con percentuale) e poi scarica il risultato (/prep-file).
 const preps = new Map();   // chiave -> { state: download|convert|ready|error, pct, file, ext, size, err }
 const sha1hex = (t) => require('crypto').createHash('sha1').update(t).digest('hex');
-const VITA_VF = "scale=w='min(720,iw)':h='min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p";
+const VITA_VF = "scale=w='min(720,iw)':h='min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=16,format=yuv420p";
 function probeDuration(file) { return new Promise((res) => require('child_process').execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { timeout: 20000 }, (e, so) => res(e ? 0 : parseFloat(so) || 0))); }
 function runFfmpeg(args, durSec, onPct) {
   return new Promise((resolve, reject) => {
@@ -407,6 +409,18 @@ function prepStart(jid, id, kind) {
     finally { for (const f of [src, tmp]) { try { fs.unlinkSync(f); } catch (_) {} } }
   })();
   return key;
+}
+// Video in arrivo (storie e chat): si convertono in background, uno alla volta, cosi' sulla Vita sono gia' pronti.
+const bgQueue = []; let bgBusy = false;
+function bgPrep(jid, id) {
+  const key = sha1hex(jid + '|' + id + '|video'); const x = preps.get(key);
+  if ((x && x.state !== 'error') || bgQueue.some((t) => t[2] === key)) return;
+  if (fs.existsSync(path.join(VIDEO_DIR, key + '.mp4'))) return;
+  bgQueue.push([jid, id, key]); bgNext();
+}
+function bgNext() {
+  if (bgBusy || !bgQueue.length) return; bgBusy = true; const [jid, id, key] = bgQueue.shift();
+  prepStart(jid, id, 'video'); const t = setInterval(() => { const x = preps.get(key); if (!x || x.state === 'ready' || x.state === 'error') { clearInterval(t); bgBusy = false; bgNext(); } }, 500);
 }
 // Le foto si preparano in anticipo (download da WhatsApp + riduzione) con al massimo 2 lavori alla volta; una richiesta che arriva
 // mentre la stessa foto e' gia' in preparazione si accoda a quella invece di rifare tutto.
@@ -711,6 +725,7 @@ http.createServer(async (req, res) => {
         if (m.key.fromMe) continue;
         const v = view(m); if (v.ts < cutoff) continue;
         const sender = m.key.participant || m.participant || '?'; if (!by.has(sender)) by.set(sender, []);
+        if (v.kind === 'video') bgPrep('status@broadcast', v.id);
         by.get(sender).push({ id: v.id, kind: v.kind, text: v.text, ts: v.ts, w: v.w, h: v.h });
       }
       const out = [...by.entries()].map(([jid, items]) => ({ jid, name: nameOf(jid), items: items.sort((a, b) => a.ts - b.ts) })).sort((a, b) => b.items[b.items.length - 1].ts - a.items[a.items.length - 1].ts);

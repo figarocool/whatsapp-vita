@@ -11,7 +11,7 @@ set(VITA_APP_NAME "WhatsApp")
 set(VITA_TITLEID  "WHAP00001")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -Wall -std=gnu11")
 
-set(SRCS src/main.c src/json.c src/net.c src/updater.c src/i18n.c src/i18n_data.c src/sharedfb_stub.c)
+set(SRCS src/main.c src/json.c src/net.c src/updater.c src/player.c src/i18n.c src/i18n_data.c src/sharedfb_stub.c)
 add_executable(${PROJECT_NAME} ${SRCS})
 add_executable(whatsapp_safe ${SRCS})
 target_compile_definitions(whatsapp_safe PRIVATE SAFE_BUILD=1)
@@ -19,12 +19,12 @@ target_link_libraries(${PROJECT_NAME}
   vita2d curl mbedtls mbedx509 mbedcrypto freetype png jpeg zstd bz2 z m pthread SceAppMgr_stub
   SceDisplay_stub SceGxm_stub SceCtrl_stub SceTouch_stub SceSysmodule_stub
   SceCommonDialog_stub SceIme_stub SceCamera_stub SceAppUtil_stub SceNet_stub SceNetCtl_stub
-  SceNotificationUtil_stub ScePromoterUtil_stub
+  SceNotificationUtil_stub ScePromoterUtil_stub SceAvPlayer_stub SceAudio_stub
   SceHttp_stub SceSsl_stub SceKernelThreadMgr_stub SceRtc_stub ScePower_stub)
 target_link_libraries(whatsapp_safe
   vita2d curl mbedtls mbedx509 mbedcrypto freetype png jpeg zstd bz2 z m pthread SceAppMgr_stub
   SceDisplay_stub SceGxm_stub SceCtrl_stub SceTouch_stub SceSysmodule_stub
-  SceCommonDialog_stub SceIme_stub SceCamera_stub SceAppUtil_stub SceNet_stub SceNetCtl_stub
+  SceCommonDialog_stub SceIme_stub SceCamera_stub SceAppUtil_stub SceNet_stub SceNetCtl_stub SceAvPlayer_stub SceAudio_stub
   SceHttp_stub SceSsl_stub SceKernelThreadMgr_stub SceRtc_stub ScePower_stub)
 
 

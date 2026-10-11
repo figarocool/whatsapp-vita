@@ -260,6 +260,12 @@ static int load_paf(void) {
   uint32_t opt[4] = { (uint32_t)sizeof opt, (uint32_t)&result, UINT32_MAX, UINT32_MAX };
   return sceSysmoduleLoadModuleInternalWithArg(SCE_SYSMODULE_INTERNAL_PAF, sizeof args, args, (SceSysmoduleOpt *)opt);
 }
+static void delete_helper_pkg(void) {   // cancella l'app installatrice, se c'e' (serve per rimetterla fresca a ogni aggiornamento)
+  int res = load_paf(); if (res < 0) return;
+  res = sceSysmoduleLoadModuleInternal(SCE_SYSMODULE_INTERNAL_PROMOTER_UTIL);
+  if (res >= 0) { if (scePromoterUtilityInit() >= 0) { res = scePromoterUtilityDeletePkg(HELPER_TITLE); utrace("installatore: cancellazione precedente -> 0x%08X", (unsigned)res); scePromoterUtilityExit(); } sceSysmoduleUnloadModuleInternal(SCE_SYSMODULE_INTERNAL_PROMOTER_UTIL); }
+  sceSysmoduleUnloadModuleInternalWithArg(SCE_SYSMODULE_INTERNAL_PAF, 0, NULL, NULL);
+}
 static int promote_directory(const char *path) {
   int res = load_paf(); if (res < 0) return res;
   res = sceSysmoduleLoadModuleInternal(SCE_SYSMODULE_INTERNAL_PROMOTER_UTIL);
@@ -287,6 +293,7 @@ static int stage_and_launch(const char *vpk, const char *tag) {
   if (sceIoGetstat(he, &st) < 0 || st.st_size < 1024) { remove_tree(HELPER_ROOT); return -8; }
   if (wa_make_head_bin(HELPER_ROOT, "app0:/assets/vitashell-head.bin", HELPER_TITLE) < 0) { remove_tree(HELPER_ROOT); return -10; }
   set_msg("Installo l'installatore...");
+  { SceIoStat hst; if (sceIoGetstat("ux0:/app/" HELPER_TITLE, &hst) >= 0) delete_helper_pkg(); }
   int res = promote_directory(HELPER_ROOT); utrace("installatore: promozione -> 0x%08X", (unsigned)res); if (res < 0) return res;
   remove_tree(HELPER_ROOT); write_small(HELPER_MARKER, HELPER_TITLE);
   char uri[64]; snprintf(uri, sizeof uri, "psgm:play?titleid=%s", HELPER_TITLE);
@@ -380,9 +387,8 @@ void upd_init(void) {
 void upd_cleanup_helper(void) {
 #ifndef SAFE_BUILD
   SceIoStat st; if (sceIoGetstat(HELPER_MARKER, &st) < 0) return;
-  // L'installatore (che ci ha appena riaperto) potrebbe essere ancora in uscita: cancellarlo mentre gira faceva chiudere l'app. Si aspetta.
-  utrace("pulizia installatore: attendo che sia uscito"); sceKernelDelayThread(4 * 1000 * 1000);
-  utrace("pulizia installatore: inizio");
+  // Va chiamata all'USCITA dell'app, non all'avvio: all'avvio la cancellazione (e l'attesa) tenevano lo schermo senza immagine e la Vita tornava alla schermata principale.
+  utrace("pulizia installatore: inizio (all'uscita dell'app)");
   int res = load_paf(); if (res < 0) { utrace("pulizia installatore: moduli non caricati 0x%08X", (unsigned)res); return; }
   res = sceSysmoduleLoadModuleInternal(SCE_SYSMODULE_INTERNAL_PROMOTER_UTIL);
   if (res >= 0) { if (scePromoterUtilityInit() >= 0) { scePromoterUtilityDeletePkg(HELPER_TITLE); scePromoterUtilityExit(); } sceSysmoduleUnloadModuleInternal(SCE_SYSMODULE_INTERNAL_PROMOTER_UTIL); }

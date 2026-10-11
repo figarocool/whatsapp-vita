@@ -1050,8 +1050,7 @@ int main(void) {
   { char d = '2'; SceUID sf = sceIoOpen("ux0:data/whatsapp/ui_scale.txt", SCE_O_RDONLY, 0); if (sf >= 0) { sceIoRead(sf, &d, 1); sceIoClose(sf); } ui_k = d == '0' ? 1.0f : d == '1' ? 1.5f : 2.0f; }   // predefinito: molto grande (2x)
   { char d = '0'; SceUID tf = sceIoOpen("ux0:data/whatsapp/theme_ui.txt", SCE_O_RDONLY, 0); if (tf >= 0) { sceIoRead(tf, &d, 1); sceIoClose(tf); } apply_ui_theme(d == '1'); }   // predefinito: chiaro
   upd_note("app: avvio (main)");   // primissima riga: se dopo un aggiornamento manca, l'app non e' nemmeno partita
-  upd_init(); upd_note("app: versione letta"); upd_cleanup_helper();   // prima della grafica: usa moduli di sistema
-  upd_note("app: pulizia fatta, avvio la grafica");
+  upd_init(); upd_note("app: versione letta, avvio la grafica");
   vita2d_init_advanced(8 * 1024 * 1024); vita2d_set_clear_color(C_BG);   // memoria temporanea per frame: 8 MB (di default 1 MB: con l'interfaccia ingrandita poteva finire)
   pool_total = vita2d_pool_free_space();
   font = vita2d_load_font_file("app0:assets/Roboto-Regular.ttf"); for (int i = 0; i < 4; i++) fonts[i] = vita2d_load_font_file("app0:assets/Roboto-Regular.ttf");
@@ -1584,6 +1583,7 @@ int main(void) {
     }
   }
   cam_stop(); crumb("uscita normale"); quit_flag = 1; pthread_join(th, NULL); sceIoRemove("ur0:tai/wa_active.txt"); sceIoRemove(LOCKFILE);
+  upd_cleanup_helper();   // se resta l'app installatrice dell'ultimo aggiornamento, la si toglie ora (a grafica chiusa), non all'avvio
   sceKernelExitProcess(0);
   return 0;
 }

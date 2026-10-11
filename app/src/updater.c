@@ -8,6 +8,7 @@
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/sysmodule.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -299,6 +300,8 @@ static int stage_and_launch(const char *vpk, const char *tag) {
   char uri[64]; snprintf(uri, sizeof uri, "psgm:play?titleid=%s", HELPER_TITLE);
   set_msg("Avvio l'installazione: l'app si riaprira' da sola"); res = sceAppMgrLaunchAppByUri(0xFFFFF, uri); utrace("installatore: avvio -> 0x%08X", (unsigned)res); if (res < 0) return res;
   pthread_mutex_lock(&um); ui.must_exit = 1; pthread_mutex_unlock(&um);
+  // Come VitaShell: lanciata l'altra app, si esce SUBITO. Se l'app restava in esecuzione, la Vita chiedeva "non puo' partire perche' e ancora aperta: OK per chiuderla".
+  sceKernelExitProcess(0);
   return 0;
 }
 #endif

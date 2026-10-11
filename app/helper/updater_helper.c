@@ -79,12 +79,9 @@ int main(void) {
   show_screen();
   int result = promote_app(); hlog("promozione di WhatsApp -> 0x%08X", result);
   if (result < 0) report_failure(result); else sceIoRemove(FAILURE_FILE);
-  // Riapre WhatsApp. Se la prima apertura venisse interrotta (l'app appena installata partiva e si chiudeva subito), la seconda la riporta su:
-  // aprire un'app gia' in esecuzione la riprende soltanto, non ne crea un'altra. L'installatore resta vivo finche' l'app e' ben avviata.
-  int r1 = sceAppMgrLaunchAppByUri(0xFFFFF, "psgm:play?titleid=" TITLE_ID); hlog("prima apertura -> 0x%08X", r1);
-  sceKernelDelayThread(5 * 1000 * 1000);
-  int r2 = sceAppMgrLaunchAppByUri(0xFFFFF, "psgm:play?titleid=" TITLE_ID); hlog("seconda apertura -> 0x%08X", r2);
-  sceKernelDelayThread(3 * 1000 * 1000);
+  // Riapre WhatsApp e ESCE subito (come VitaShell): se restasse in esecuzione, la Vita chiederebbe di chiuderla prima di aprire l'altra app.
+  int r1 = sceAppMgrLaunchAppByUri(0xFFFFF, "psgm:play?titleid=" TITLE_ID); hlog("apertura di WhatsApp -> 0x%08X", r1);
   hlog("installatore: fine", 0);
+  sceKernelExitProcess(0);
   return 0;
 }

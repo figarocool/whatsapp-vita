@@ -329,7 +329,7 @@ async function start() {
   const { state: auth, saveCreds } = await useMultiFileAuthState(AUTH);
   let version;
   try { ({ version } = await fetchLatestBaileysVersion()); } catch (_) {}
-  sock = makeWASocket({ auth, version, logger, browser: [process.env.WA_DEVICE_NAME || ('PSVita ' + require('os').hostname()), 'Chrome', '1.0.0'], syncFullHistory: false, keepAliveIntervalMs: ENGINE ? 60000 : 30000 });
+  sock = makeWASocket({ auth, version, logger, browser: [process.env.WA_DEVICE_NAME || ('PSVita ' + require('os').hostname()), 'Chrome', '1.0.0'], syncFullHistory: false, keepAliveIntervalMs: ENGINE ? 120000 : 30000 });
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', async ({ connection, qr, lastDisconnect, isNewLogin }) => {
     if (isNewLogin) { log('nuovo login: parte la prima sincronizzazione'); sync.active = true; sync.progress = 0; sync.t = Date.now(); }

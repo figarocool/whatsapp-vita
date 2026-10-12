@@ -48,6 +48,9 @@ typedef struct {
   unsigned char *frag; size_t fraglen; int fragop;
   JSValue cb;                      // funzione (evento, dati)
   int closed_notified;
+  // filo di lettura: continua a leggere dal socket (e decifrare) anche quando il JS e' impegnato per decine di secondi, altrimenti il server
+  // vede un ricevente che non legge e chiude il collegamento durante le cronologie grandi
+  long long last_ping; pthread_t th; int th_on; volatile int th_stop; pthread_mutex_t mu; unsigned char *ib; size_t ilen, icap; volatile int ieof;
 } WS;
 
 struct Engine {
@@ -284,26 +287,28 @@ static JSValue js_zlib(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
 
 // ---------- WebSocket sicuro (wss) su mbedTLS ----------
 static void ws_free(WS *w) {
-  if (!w->used) return; mbedtls_ssl_free(&w->ssl); mbedtls_ssl_config_free(&w->conf); mbedtls_net_free(&w->net);
+  if (!w->used) return; if (w->th_on) { w->th_stop = 1; pthread_join(w->th, NULL); w->th_on = 0; } pthread_mutex_destroy(&w->mu); free(w->ib);
+  mbedtls_ssl_free(&w->ssl); mbedtls_ssl_config_free(&w->conf); mbedtls_net_free(&w->net);
   free(w->rx); free(w->frag); if (G && G->ctx) JS_FreeValue(G->ctx, w->cb); memset(w, 0, sizeof *w);
 }
 static int ws_write_all(WS *w, const unsigned char *p, size_t n) {
   size_t off = 0; long long t0 = now_ms();
   while (off < n) {
-    int r = mbedtls_ssl_write(&w->ssl, p + off, n - off);
+    if (w->th_on) pthread_mutex_lock(&w->mu); int r = mbedtls_ssl_write(&w->ssl, p + off, n - off); if (w->th_on) pthread_mutex_unlock(&w->mu);
     if (r > 0) { off += r; continue; }
     if (r == MBEDTLS_ERR_SSL_WANT_WRITE || r == MBEDTLS_ERR_SSL_WANT_READ) { if (now_ms() - t0 > 20000) return -1; fd_set fs; FD_ZERO(&fs); FD_SET(w->net.fd, &fs); struct timeval tv = { 0, 50000 }; select(w->net.fd + 1, r == MBEDTLS_ERR_SSL_WANT_READ ? &fs : NULL, r == MBEDTLS_ERR_SSL_WANT_WRITE ? &fs : NULL, NULL, &tv); continue; }
     return -1;
   }
   return 0;
 }
-static int ws_send_frame(WS *w, int op, const unsigned char *d, size_t n) {
+static int ws_send_frame_m(WS *w, int op, const unsigned char *d, size_t n, const unsigned char *fixed_mask) {
   unsigned char *f = malloc(n + 14); size_t h = 0; f[h++] = 0x80 | op;
   if (n < 126) f[h++] = 0x80 | (unsigned char)n; else if (n < 65536) { f[h++] = 0x80 | 126; f[h++] = n >> 8; f[h++] = n & 255; } else { f[h++] = 0x80 | 127; for (int i = 7; i >= 0; i--) f[h++] = (unsigned char)((unsigned long long)n >> (8 * i)); }
-  unsigned char mask[4]; mbedtls_ctr_drbg_random(&G->drbg, mask, 4); memcpy(f + h, mask, 4); h += 4;
+  unsigned char mask[4]; if (fixed_mask) memcpy(mask, fixed_mask, 4); else mbedtls_ctr_drbg_random(&G->drbg, mask, 4); memcpy(f + h, mask, 4); h += 4;
   for (size_t i = 0; i < n; i++) f[h + i] = d[i] ^ mask[i & 3];
   int r = ws_write_all(w, f, h + n); free(f); return r;
 }
+static int ws_send_frame(WS *w, int op, const unsigned char *d, size_t n) { return ws_send_frame_m(w, op, d, n, NULL); }
 static void ws_event(WS *w, const char *type, const void *data, size_t n, int binary) {
   JSContext *ctx = G->ctx; JSValue args[3] = { JS_NewString(ctx, type), data ? new_ab(ctx, data, n) : JS_UNDEFINED, JS_NewBool(ctx, binary) };
   JSValue cb = JS_DupValue(ctx, w->cb); STAGE("esecuzione JS (messaggio websocket)");
@@ -311,6 +316,28 @@ static void ws_event(WS *w, const char *type, const void *data, size_t n, int bi
   JS_FreeValue(ctx, r); for (int i = 0; i < 3; i++) JS_FreeValue(ctx, args[i]);
 }
 // ws_open(url, headers{}, callback) -> id
+static void *ws_reader(void *arg) {
+  WS *w = (WS *)arg;
+  while (!w->th_stop) {
+    int got = 0, err = 0;
+    pthread_mutex_lock(&w->mu);
+    if (w->ilen < (48u << 20)) for (int g = 0; g < 32 && !w->th_stop; g++) {
+      if (w->ilen + 16384 > w->icap) { size_t nc = w->icap ? w->icap * 2 : 131072; unsigned char *nb = realloc(w->ib, nc); if (!nb) break; w->ib = nb; w->icap = nc; }
+      int r = mbedtls_ssl_read(&w->ssl, w->ib + w->ilen, w->icap - w->ilen);
+      if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) break;
+      if (r <= 0) { err = 1; break; }
+      w->ilen += (size_t)r; got = 1;
+    }
+    if (err) w->ieof = 1;
+    int more = mbedtls_ssl_get_bytes_avail(&w->ssl) > 0;
+    pthread_mutex_unlock(&w->mu);
+    if (err) break;
+    { static const unsigned char pm[4] = { 0x5A, 0xC3, 0x17, 0x9E }; long long nw = now_ms(); if (!w->last_ping) w->last_ping = nw; if (nw - w->last_ping >= 15000) { w->last_ping = nw; ws_send_frame_m(w, 9, (const unsigned char *)"v", 1, pm); } }   // ping WebSocket nativo: il collegamento resta vivo anche quando il JS e' impegnato
+    if (!got && !more) { fd_set rs; FD_ZERO(&rs); FD_SET(w->net.fd, &rs); struct timeval tv = { 0, 50000 }; select(w->net.fd + 1, &rs, NULL, NULL, &tv); }
+    else if (w->ilen >= (48u << 20)) usleep(20000);
+  }
+  return NULL;
+}
 static JSValue js_ws_open(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   const char *url = JS_ToCString(ctx, argv[0]); if (!url) return JS_EXCEPTION;
   char host[256], path[1024], port[8] = "443"; const char *u = url; int tls = 1;
@@ -320,7 +347,7 @@ static JSValue js_ws_open(JSContext *ctx, JSValueConst this_val, int argc, JSVal
   JS_FreeCString(ctx, url);
   if (!tls) return JS_ThrowTypeError(ctx, "solo wss");
   int id = -1; for (int i = 0; i < MAXWS; i++) if (!G->ws[i].used) { id = i; break; } if (id < 0) return JS_ThrowInternalError(ctx, "troppi websocket");
-  WS *w = &G->ws[id]; memset(w, 0, sizeof *w); w->used = 1; w->cb = JS_DupValue(ctx, argv[2]);
+  WS *w = &G->ws[id]; memset(w, 0, sizeof *w); w->used = 1; pthread_mutex_init(&w->mu, NULL); w->cb = JS_DupValue(ctx, argv[2]);
   mbedtls_ssl_init(&w->ssl); mbedtls_ssl_config_init(&w->conf); mbedtls_net_init(&w->net);
   int rc; char eb[160]; STAGE("websocket: DNS e connessione TCP"); long long tws = now_ms();
   if ((rc = mbedtls_net_connect(&w->net, host, port, MBEDTLS_NET_PROTO_TCP)) != 0) { ws_free(w); elog("websocket: connessione a %s fallita (%d) dopo %lld ms", host, rc, now_ms() - tws); return JS_ThrowInternalError(ctx, "connessione a %s fallita (%d)", host, rc); }
@@ -349,6 +376,7 @@ static JSValue js_ws_open(JSContext *ctx, JSValueConst this_val, int argc, JSVal
   while (rl < sizeof resp - 1 && now_ms() - t0 < 20000) { int r = mbedtls_ssl_read(&w->ssl, (unsigned char *)resp + rl, 1); if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) continue; if (r <= 0) break; rl++; if (rl >= 4 && !memcmp(resp + rl - 4, "\r\n\r\n", 4)) break; }
   resp[rl] = 0; if (strncmp(resp, "HTTP/1.1 101", 12) != 0) { char first[120]; snprintf(first, sizeof first, "%.100s", resp); char *nl = strchr(first, '\r'); if (nl) *nl = 0; ws_free(w); return JS_ThrowInternalError(ctx, "upgrade WebSocket rifiutato: %s", first); }
   elog("websocket: aperto dopo %lld ms", now_ms() - tws); mbedtls_net_set_nonblock(&w->net); mbedtls_ssl_set_bio(&w->ssl, &w->net, mbedtls_net_send, mbedtls_net_recv, NULL); w->state = 1; w->fd = w->net.fd;   // da qui letture non bloccanti
+  { pthread_attr_t pa; pthread_attr_init(&pa); pthread_attr_setstacksize(&pa, 256 * 1024); w->th_stop = 0; if (pthread_create(&w->th, &pa, ws_reader, w) == 0) w->th_on = 1; pthread_attr_destroy(&pa); }
   return JS_NewInt32(ctx, id);
 }
 static JSValue js_ws_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -357,12 +385,17 @@ static JSValue js_ws_send(JSContext *ctx, JSValueConst this_val, int argc, JSVal
 }
 static JSValue js_ws_close(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   int id; JS_ToInt32(ctx, &id, argv[0]); if (id < 0 || id >= MAXWS || !G->ws[id].used) return JS_UNDEFINED; WS *w = &G->ws[id];
-  if (w->state == 1) { unsigned char c[2] = { 0x03, 0xe8 }; ws_send_frame(w, 8, c, 2); mbedtls_ssl_close_notify(&w->ssl); }
+  if (w->state == 1) { unsigned char c[2] = { 0x03, 0xe8 }; ws_send_frame(w, 8, c, 2); if (w->th_on) pthread_mutex_lock(&w->mu); mbedtls_ssl_close_notify(&w->ssl); if (w->th_on) pthread_mutex_unlock(&w->mu); }
   w->state = 2; return JS_UNDEFINED;   // il callback 'close' parte dal ciclo eventi
 }
 static void ws_service(WS *w) {
   if (w->state == 2) { if (!w->closed_notified) { w->closed_notified = 1; ws_event(w, "close", NULL, 0, 0); } ws_free(w); return; }
-  for (int guard = 0; guard < 64; guard++) {
+  int eof_after = 0;
+  if (w->th_on) {   // i byte li ha gia' letti il filo di lettura
+    pthread_mutex_lock(&w->mu);
+    if (w->ilen) { while (w->rxlen + w->ilen + 8192 > w->rxcap) { w->rxcap = w->rxcap ? w->rxcap * 2 : 65536; w->rx = realloc(w->rx, w->rxcap); } memcpy(w->rx + w->rxlen, w->ib, w->ilen); w->rxlen += w->ilen; w->ilen = 0; }
+    eof_after = w->ieof; pthread_mutex_unlock(&w->mu);
+  } else for (int guard = 0; guard < 64; guard++) {
     if (w->rxlen + 8192 > w->rxcap) { w->rxcap = w->rxcap ? w->rxcap * 2 : 65536; w->rx = realloc(w->rx, w->rxcap); }
     int r = mbedtls_ssl_read(&w->ssl, w->rx + w->rxlen, w->rxcap - w->rxlen);
     if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) break;
@@ -387,6 +420,7 @@ static void ws_service(WS *w) {
     off += h + (size_t)len;
   }
   if (off) { memmove(w->rx, w->rx + off, w->rxlen - off); w->rxlen -= off; }
+  if (eof_after && w->used && w->state == 1) { if (!w->closed_notified) { w->closed_notified = 1; w->state = 2; ws_event(w, "close", NULL, 0, 0); } ws_free(w); }   // il server ha chiuso: prima si e' consegnato tutto quello che era arrivato
 }
 
 
@@ -628,7 +662,7 @@ int eng_loop_step(Engine *e, int max_wait_ms) {
   long long now = now_ms(); Timer *best = NULL; for (Timer *t = e->timers; t; t = t->next) if (!best || t->due < best->due) best = t;
   long long wait = max_wait_ms; if (best) { long long d = best->due - now; if (d < 0) d = 0; if (d < wait) wait = d; }
   int nfd = 0, maxfd = -1; fd_set rs; FD_ZERO(&rs); int pending_ssl = 0;
-  for (int i = 0; i < MAXWS; i++) { WS *w = &e->ws[i]; if (!w->used) continue; nfd++; if (w->state == 2) pending_ssl = 1; else { FD_SET(w->net.fd, &rs); if (w->net.fd > maxfd) maxfd = w->net.fd; if (mbedtls_ssl_get_bytes_avail(&w->ssl) > 0) pending_ssl = 1; } }
+  for (int i = 0; i < MAXWS; i++) { WS *w = &e->ws[i]; if (!w->used) continue; nfd++; if (w->state == 2 || (w->th_on && (w->ilen > 0 || w->ieof))) pending_ssl = 1; else if (w->th_on) { /* ci pensa il filo di lettura */ } else { FD_SET(w->net.fd, &rs); if (w->net.fd > maxfd) maxfd = w->net.fd; if (mbedtls_ssl_get_bytes_avail(&w->ssl) > 0) pending_ssl = 1; } }
   for (int i = 0; i < MAXHTTP; i++) { Http *h = &G_http[i]; if (!h->used) continue; nfd++; FD_SET(h->net.fd, &rs); if (h->net.fd > maxfd) maxfd = h->net.fd; if (h->tls && mbedtls_ssl_get_bytes_avail(&h->ssl) > 0) pending_ssl = 1; }
   if (tcp_lfd >= 0) { FD_SET(tcp_lfd, &rs); if (tcp_lfd > maxfd) maxfd = tcp_lfd; for (int i = 0; i < 16; i++) if (tcpc[i].fd >= 0) { FD_SET(tcpc[i].fd, &rs); if (tcpc[i].fd > maxfd) maxfd = tcpc[i].fd; } }
   if (pending_ssl) wait = 0;

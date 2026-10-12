@@ -410,6 +410,7 @@ static void ws_service(WS *w) {
     if (len > (64u << 20)) { w->state = 2; break; }
     if (w->rxlen - off < h + len) break;
     unsigned char *pl = f + h; if (masked) for (unsigned long long i = 0; i < len; i++) pl[i] ^= mk[i & 3];
+    if (op == 10) { static int np; if (np++ < 3) elog("websocket: pong ricevuto (%d)", np); }
     if (op == 9) ws_send_frame(w, 10, pl, (size_t)len);
     else if (op == 8) { w->state = 2; off += h + (size_t)len; break; }
     else if (op == 1 || op == 2 || op == 0) {

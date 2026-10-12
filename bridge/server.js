@@ -320,6 +320,22 @@ function resetSession(reason) {
   setTimeout(() => start().catch(console.error), 1500);
 }
 
+
+// Controllo che il collegamento sia vivo (solo dentro la Vita). Il controllo di Baileys misura il tempo dall'ultimo messaggio ricevuto e, quando il motore e' impegnato
+// per decine di secondi, scambia il ritardo per un collegamento perso. Qui si manda un ping a WhatsApp e si aspetta la risposta: le risposte arrivate nel frattempo vengono
+// elaborate prima dei timer, quindi un calcolo lungo non da' falsi allarmi; il collegamento si chiude solo dopo due ping senza risposta (circa un minuto e mezzo).
+let liveTimer = null;
+function startLiveness(mySock) {
+  if (liveTimer) clearInterval(liveTimer); let miss = 0;
+  liveTimer = setInterval(async () => {
+    if (mySock !== sock) return;
+    try {
+      await Promise.race([mySock.query({ tag: 'iq', attrs: { id: mySock.generateMessageTag(), to: 's.whatsapp.net', type: 'get', xmlns: 'w:p' }, content: [{ tag: 'ping', attrs: {} }] }), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 40000))]);
+      miss = 0;
+    } catch (e) { if (++miss >= 2) { log('ping senza risposta: chiudo il collegamento per ricollegarmi'); miss = 0; try { mySock.end(new Error('ping senza risposta')); } catch (_) {} } }
+  }, 25000);
+}
+
 // ---------- connessione ----------
 async function start() {
   const first = !B;
@@ -329,13 +345,15 @@ async function start() {
   const { state: auth, saveCreds } = await useMultiFileAuthState(AUTH);
   let version;
   try { ({ version } = await fetchLatestBaileysVersion()); } catch (_) {}
-  sock = makeWASocket({ auth, version, logger, browser: [process.env.WA_DEVICE_NAME || ('PSVita ' + require('os').hostname()), 'Chrome', '1.0.0'], syncFullHistory: false, keepAliveIntervalMs: ENGINE ? 120000 : 30000 });
+  sock = makeWASocket({ auth, version, logger, browser: [process.env.WA_DEVICE_NAME || ('PSVita ' + require('os').hostname()), 'Chrome', '1.0.0'], syncFullHistory: false, keepAliveIntervalMs: ENGINE ? 3600000 : 30000 });
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', async ({ connection, qr, lastDisconnect, isNewLogin }) => {
     if (isNewLogin) { log('nuovo login: parte la prima sincronizzazione'); sync.active = true; sync.progress = 0; sync.t = Date.now(); }
     if (connection) log('connessione:', connection, lastDisconnect?.error?.message || '');
     if (qr) { sync.active = false; state.qr = qr; state.status = 'qr'; console.log('QR pronto: http://localhost:' + PORT + '/qr.png'); }
+    if (connection === 'open' && ENGINE) startLiveness(sock);
     if (connection === 'open') { state.status = 'open'; state.qr = null; state.me = sock.user?.id || null; console.log('Connesso', state.me); setTimeout(() => writeLiteFiles(true), 3000); sock.fetchBlocklist().then((l) => { blocked.clear(); for (const j of l || []) if (j) blocked.add(B.jidNormalizedUser(j)); }).catch(() => {}); }
+    if (connection === 'close' && liveTimer) { clearInterval(liveTimer); liveTimer = null; }
     if (connection === 'close') {
       if (Date.now() - lastReset < 5000) return;   // chiusura provocata dalla pulizia della sessione: il riavvio lo fa resetSession
       const code = lastDisconnect?.error?.output?.statusCode;

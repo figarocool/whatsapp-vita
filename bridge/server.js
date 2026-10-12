@@ -326,13 +326,18 @@ function resetSession(reason) {
 // elaborate prima dei timer, quindi un calcolo lungo non da' falsi allarmi; il collegamento si chiude solo dopo due ping senza risposta (circa un minuto e mezzo).
 let liveTimer = null;
 function startLiveness(mySock) {
-  if (liveTimer) clearInterval(liveTimer); let miss = 0;
+  if (liveTimer) clearInterval(liveTimer); let miss = 0, lastFrame = Date.now();
+  try { mySock.ws.on('frame', () => { lastFrame = Date.now(); }); } catch (_) {}   // qualsiasi pacchetto ricevuto prova che il collegamento e' vivo
   liveTimer = setInterval(async () => {
     if (mySock !== sock) return;
     try {
-      await Promise.race([mySock.query({ tag: 'iq', attrs: { id: mySock.generateMessageTag(), to: 's.whatsapp.net', type: 'get', xmlns: 'w:p' }, content: [{ tag: 'ping', attrs: {} }] }), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 40000))]);
+      // identico al controllo di Baileys: il destinatario e' '@s.whatsapp.net' (con la chiocciola)
+      await Promise.race([mySock.query({ tag: 'iq', attrs: { id: mySock.generateMessageTag(), to: '@s.whatsapp.net', type: 'get', xmlns: 'w:p' }, content: [{ tag: 'ping', attrs: {} }] }), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 40000))]);
       miss = 0;
-    } catch (e) { if (++miss >= 2) { log('ping senza risposta: chiudo il collegamento per ricollegarmi'); miss = 0; try { mySock.end(new Error('ping senza risposta')); } catch (_) {} } }
+    } catch (e) {
+      if (Date.now() - lastFrame < 70000) { miss = 0; return; }   // il ping non ha risposto ma altri pacchetti arrivano: il collegamento c'e'
+      if (++miss >= 2) { log('nessun pacchetto da oltre 70 s e ping senza risposta: chiudo il collegamento per ricollegarmi'); miss = 0; try { mySock.end(new Error('ping senza risposta')); } catch (_) {} }
+    }
   }, 25000);
 }
 

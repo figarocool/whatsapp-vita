@@ -94,6 +94,35 @@ function learnContact(c) {
   dirtyMeta = true;
 } // key -> {buf, type}
 
+function mergeChat(c) {
+  if (!c?.id || c.id === 'status@broadcast') return;
+  const old = chats.get(c.id) || { jid: c.id, unread: 0, ts: 0 };
+  const next = { ...old, name: nameFor(c.id) || c.name || old.name || c.id.split('@')[0] };
+  if (c.unreadCount != null) next.unread = c.unreadCount;
+  if (c.conversationTimestamp != null) next.ts = Math.max(old.ts || 0, num(c.conversationTimestamp));
+  if ('pinned' in c) next.pinned = c.pinned ? num(c.pinned) : 0;
+  if ('archived' in c) next.archived = !!c.archived;
+  if ('muteEndTime' in c) next.muted = c.muteEndTime ? num(c.muteEndTime) : 0;
+  chats.set(c.id, next); dirtyMeta = true; lastMetaSave = 0;
+}
+function mergeGroup(g) {
+  if (!g?.id?.endsWith('@g.us')) return;
+  if (g.subject) names.set(g.id, g.subject);
+  mergeChat({ id: g.id, name: g.subject });
+}
+async function recoverGroups(connection, attempt = 0) {
+  if (connection !== sock || state.status !== 'open') return;
+  try {
+    const groups = await connection.groupFetchAllParticipating();
+    if (connection !== sock || state.status !== 'open') return;
+    for (const g of Object.values(groups || {})) mergeGroup(g);
+    log('recupero gruppi: ricevuti=' + Object.keys(groups || {}).length + ' chat=' + chats.size);
+  } catch (e) {
+    log('recupero gruppi fallito: tentativo=' + (attempt + 1) + ' ' + e.message);
+    if (connection === sock && attempt < 2) setTimeout(() => recoverGroups(connection, attempt + 1), 30000);
+  }
+}
+
 // ---------- utilità messaggi ----------
 function unwrap(m) { return B ? (B.normalizeMessageContent(m.message) || {}) : (m.message || {}); }
 const num = (v) => {
@@ -223,7 +252,7 @@ function writeAtomic(file, text) { fs.writeFileSync(file + '.tmp', text); fs.ren
 function saveStore(all = false) {
   if (!B) return; const t0 = Date.now(); let n = 0;
   try {
-    if (dirtyMeta && (all || !ENGINE || Date.now() - lastMetaSave > 60000)) { dirtyMeta = false; lastMetaSave = Date.now(); writeAtomic(META, JSON.stringify({ chats: [...chats.values()], names: [...names.entries()], pnames: [...pnames.entries()], alias: [...alias.entries()], viewers: [...statusViewers.entries()].map(([k, v]) => [k, [...v.entries()]]) })); }
+    if (dirtyMeta && (all || !ENGINE || Date.now() - lastMetaSave > 60000)) { writeAtomic(META, JSON.stringify({ chats: [...chats.values()], names: [...names.entries()], pnames: [...pnames.entries()], alias: [...alias.entries()], viewers: [...statusViewers.entries()].map(([k, v]) => [k, [...v.entries()]]) })); dirtyMeta = false; lastMetaSave = Date.now(); }
     for (const jid of [...dirtyChats]) {
       if (!all && n >= 15) break;               // al massimo 15 chat per giro: niente picchi di memoria/CPU
       if (!all && ENGINE && n >= 1 && Date.now() - t0 > 1500) break;   // dentro la Vita: dopo 1,5 s si lascia respirare il motore (ping, richieste), il resto al prossimo giro
@@ -260,6 +289,20 @@ function loadStore() {
       if (!f.startsWith('c_') || !f.endsWith('.json')) continue;
       try { lazyChats.add(Buffer.from(f.slice(2, -5), 'base64url').toString('utf8')); files++; } catch (_) {}
     }
+    let recovered = 0;
+    for (const jid of [...lazyChats]) {
+      if (chats.has(jid) || jid === 'status@broadcast' || jid.endsWith('@broadcast')) continue;
+      loadChatFile(jid);
+      const messages = raws.get(jid); if (!messages?.size) continue;
+      mergeChat({ id: jid }); const chat = chats.get(jid);
+      for (const m of messages.values()) {
+        if (m.pushName && !m.key.fromMe) pnames.set(norm(m.key.participant || jid), m.pushName);
+        const d = describe(m), ts = num(m.messageTimestamp) || 0;
+        if (d && ts >= (chat.ts || 0)) { chat.ts = ts; chat.last = preview(d); }
+      }
+      recovered++;
+    }
+    if (recovered) { dirtyMeta = true; lastMetaSave = 0; log('chat recuperate dai file:', recovered); }
     log('store caricato:', chats.size, 'chat,', files, 'file');
   } catch (e) { log('lettura store fallita:', e.message); }
 }
@@ -357,6 +400,7 @@ async function start() {
     if (connection) log('connessione:', connection, lastDisconnect?.error?.message || '');
     if (qr) { sync.active = false; state.qr = qr; state.status = 'qr'; console.log('QR pronto: http://localhost:' + PORT + '/qr.png'); }
     if (connection === 'open' && ENGINE) startLiveness(sock);
+    if (connection === 'open') { const current = sock; setTimeout(() => recoverGroups(current), 5000); }
     if (connection === 'open') { state.status = 'open'; state.qr = null; state.me = sock.user?.id || null; console.log('Connesso', state.me); setTimeout(() => writeLiteFiles(true), 3000); sock.fetchBlocklist().then((l) => { blocked.clear(); for (const j of l || []) if (j) blocked.add(B.jidNormalizedUser(j)); }).catch(() => {}); }
     if (connection === 'close' && liveTimer) { clearInterval(liveTimer); liveTimer = null; }
     if (connection === 'close') {
@@ -373,7 +417,7 @@ async function start() {
     for (const mp of lidPnMappings || []) link(mp.lid, mp.pn);
     for (const c of contacts || []) learnContact(c);
     dirtyMeta = true;
-    for (const c of cs || []) chats.set(c.id, { jid: c.id, name: c.name || nameFor(c.id) || c.id.split('@')[0], unread: c.unreadCount || 0, ts: num(c.conversationTimestamp), pinned: c.pinned ? num(c.pinned) : 0 });
+    for (const c of cs || []) mergeChat(c);
     if (ENGINE && (ms || []).length > 150) {   // tanti messaggi: a blocchi, cedendo il passo fra uno e l'altro, cosi' il motore risponde ai ping e WhatsApp non chiude il collegamento
       (async () => { const all = ms; for (let i = 0; i < all.length; i += 100) { for (const m of all.slice(i, i + 100)) addMessage(m, false); await new Promise((r) => setTimeout(r, 20)); } log('cronologia: ' + all.length + ' messaggi elaborati'); })().catch((e) => log('cronologia: errore', e.message));
     } else for (const m of ms || []) addMessage(m, false);
@@ -381,7 +425,9 @@ async function start() {
   sock.ev.on('contacts.upsert', (cs) => { for (const c of cs) learnContact(c); });
   sock.ev.on('contacts.update', (cs) => { for (const c of cs) learnContact(c); });
   sock.ev.on('lid-mapping.update', ({ lid, pn }) => { link(lid, pn); dirtyMeta = true; });
-  sock.ev.on('chats.upsert', (cs) => { for (const c of cs) if (!chats.has(c.id)) chats.set(c.id, { jid: c.id, name: c.name || nameFor(c.id) || c.id.split('@')[0], unread: c.unreadCount || 0, ts: num(c.conversationTimestamp), pinned: c.pinned ? num(c.pinned) : 0 }); });
+  sock.ev.on('chats.upsert', (cs) => { for (const c of cs) mergeChat(c); });
+  sock.ev.on('groups.upsert', (gs) => { for (const g of gs) mergeGroup(g); });
+  sock.ev.on('groups.update', (gs) => { for (const g of gs) mergeGroup(g); });
   sock.ev.on('messages.upsert', ({ messages: ms, type }) => {
     if (ms.length > 5) log('messages.upsert tipo=' + type + ' n=' + ms.length); for (const m of ms) addMessage(m, type === 'notify'); });
   sock.ev.on('messages.update', (ups) => {

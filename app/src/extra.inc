@@ -897,7 +897,8 @@ static int aud_state(const char *jid, const char *id, int *pct, int *secs) {
 }
 // disegna il video (o lo stato della preparazione) nel riquadro; 1 se si vede il filmato
 static int vp_draw(float x, float y, float w, float h) {
-  int sw_draw = vp.state == 2 ? player_draw_software(x, y, w, h) : -1;
+  // Il renderer esterno usa pixel fisici, mentre questa schermata usa coordinate / UK.
+  int sw_draw = vp.state == 2 ? player_draw_software(x * UK, y * UK, w * UK, h * UK) : -1;
   if (sw_draw >= 0 && player_software_failed()) {
     char diag[200]; player_video_diag(diag, sizeof diag); crumb("lettore: %s", diag);
     player_close(); vp.state = 3;
@@ -920,14 +921,14 @@ static int vp_draw(float x, float y, float w, float h) {
     }
     return 1;
   }
-  { static unsigned long long t0; static char lk[260]; if (strcmp(lk, vp.key)) { snprintf(lk, sizeof lk, "%s", vp.key); t0 = 0; } if (vp.state == 2 && !t0) t0 = sceKernelGetProcessTimeWide(); if (vp.state == 2 && t0) { if (t && player_frames() == 1) { { unsigned a_ = 0, b_ = 0; player_size(&a_, &b_); crumb("lettore: primo fotogramma %ux%u", a_, b_); } t0 = 1; } else if (t0 > 1000 && !t && sceKernelGetProcessTimeWide() - t0 > 5000000ULL) { crumb("lettore: nessun fotogramma dopo 5 s"); t0 = 1; } } }
+  if (!vp.software) { static unsigned long long t0; static char lk[260]; if (strcmp(lk, vp.key)) { snprintf(lk, sizeof lk, "%s", vp.key); t0 = 0; } if (vp.state == 2 && !t0) t0 = sceKernelGetProcessTimeWide(); if (vp.state == 2 && t0) { if (t && player_frames() == 1) { { unsigned a_ = 0, b_ = 0; player_size(&a_, &b_); crumb("lettore: primo fotogramma %ux%u, descrittore %ux%u", a_, b_, vita2d_texture_get_width(t), vita2d_texture_get_height(t)); } t0 = 1; } else if (t0 > 1000 && !t && sceKernelGetProcessTimeWide() - t0 > 5000000ULL) { crumb("lettore: nessun fotogramma dopo 5 s"); t0 = 1; } } }
   if (t) { unsigned pw_ = 0, ph_ = 0; player_size(&pw_, &ph_); float tw0 = pw_ ? (float)pw_ : vita2d_texture_get_width(t), th0 = ph_ ? (float)ph_ : vita2d_texture_get_height(t), s; static char dk[300]; static unsigned dw, dh;
     if (strcmp(dk, vp.path)) { snprintf(dk, sizeof dk, "%s", vp.path); dw = dh = 0; SceUID df = sceIoOpen(vp.path, SCE_O_RDONLY, 0); if (df >= 0) { static uint8_t hb[524288]; int hn = sceIoRead(df, hb, sizeof hb); Mp4Info mi; if (hn > 100 && video_mp4_info(hb, (size_t)hn, &mi) == 0) { dw = (unsigned)mi.width; dh = (unsigned)mi.height; }
       SceOff sz = sceIoLseek(df, 0, SCE_SEEK_END); if (sz > 64) { uint8_t tl[64]; sceIoLseek(df, sz - 64, SCE_SEEK_SET); if (sceIoRead(df, tl, 64) == 64) for (int q = 0; q + 8 <= 64; q++) if (!memcmp(tl + q, "WVDM", 4)) { dw = (tl[q + 4] << 8) | tl[q + 5]; dh = (tl[q + 6] << 8) | tl[q + 7]; } }   // misure vere scritte dal motore quando ha allineato il contenitore
       sceIoClose(df); } }
     if (dw && dh && dw <= tw0 && dh <= th0 && (dw != (unsigned)tw0 || dh != (unsigned)th0)) {   // il decodificatore produce blocchi da 16 pixel: si mostra solo la parte vera
       s = fminf(w / dw, h / dh); vita2d_draw_texture_part_scale(t, x + (w - dw * s) / 2, y + (h - dh * s) / 2, 0, 0, dw, dh, s, s); return 1; }
-    s = fminf(w / tw0, h / th0); vita2d_draw_texture_scale(t, x + (w - tw0 * s) / 2, y + (h - th0 * s) / 2, s, s); return 1; }
+    s = fminf(w / tw0, h / th0); vita2d_draw_texture_part_scale(t, x + (w - tw0 * s) / 2, y + (h - th0 * s) / 2, 0, 0, tw0, th0, s, s); return 1; }
   // tempi: da quando e' iniziata la fase attuale, per stimare quanto manca
   static unsigned long long ph_t0; static int ph_last = -1; static char ph_key[260];
   if (strcmp(ph_key, vp.key) || ph_last != vp.phase) { snprintf(ph_key, sizeof ph_key, "%s", vp.key); ph_last = vp.phase; ph_t0 = sceKernelGetProcessTimeWide(); }

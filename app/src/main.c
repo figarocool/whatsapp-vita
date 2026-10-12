@@ -260,7 +260,7 @@ static int alive_state(void) {
 static const char *base_name(const char *p) { const char *s = strrchr(p, '/'); const char *c = strrchr(p, ':'); if (c && (!s || c > s)) s = c; return s ? s + 1 : p; }
 
 // Cache su disco di foto profilo e anteprime: all'avvio si mostrano subito, senza aspettare il motore (che nei primi secondi e' occupato).
-static void dc_path(const char *dir, const char *key, char *out, size_t n) { unsigned long long h = 1469598103934665603ULL; for (const char *p = key; *p; p++) { h ^= (unsigned char)*p; h *= 1099511628211ULL; } snprintf(out, n, "ux0:data/whatsapp/%s/%016llx.jpg", dir, h); }
+static void dc_path(const char *dir, const char *key, char *out, size_t n) { unsigned long long h = 1469598103934665603ULL; for (const char *p = key; *p; p++) { h ^= (unsigned char)*p; h *= 1099511628211ULL; } snprintf(out, n, "ux0:data/whatsapp/%s/%016llx.%s", dir, h, dir[0] == 'm' ? "json" : "jpg"); }
 static int dc_get(const char *dir, const char *key, char **buf, size_t *len, int max_age_s) {
   char p[200]; dc_path(dir, key, p, sizeof p); if (max_age_s > 0) { int a = file_age_sec(p); if (a < 0 || a > max_age_s) return -1; }
   size_t l = 0; unsigned char *b = read_file(p, &l); if (!b || l < 100) { free(b); return -1; } *buf = (char *)b; *len = l; return 0;
@@ -268,7 +268,7 @@ static int dc_get(const char *dir, const char *key, char **buf, size_t *len, int
 static unsigned long long dc_written;
 static void dc_put(const char *dir, const char *key, const char *buf, size_t len) {
   if (len < 100 || len > 2 * 1024 * 1024 || dc_written > 60ULL * 1024 * 1024) return;   // tetto di 60 MB scritti per sessione
-  static int made; if (!made) { made = 1; sceIoMkdir("ux0:data/whatsapp", 0777); sceIoMkdir("ux0:data/whatsapp/avcache", 0777); sceIoMkdir("ux0:data/whatsapp/thcache", 0777); }
+  static int made; if (!made) { made = 1; sceIoMkdir("ux0:data/whatsapp", 0777); sceIoMkdir("ux0:data/whatsapp/avcache", 0777); sceIoMkdir("ux0:data/whatsapp/thcache", 0777); sceIoMkdir("ux0:data/whatsapp/msgcache", 0777); }
   char p[200], t[210]; dc_path(dir, key, p, sizeof p); snprintf(t, sizeof t, "%s.tmp", p);
   SceUID f = sceIoOpen(t, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (f < 0) return; int w = sceIoWrite(f, buf, len); sceIoClose(f);
   if (w == (int)len) { sceIoRemove(p); sceIoRename(t, p); dc_written += len; } else sceIoRemove(t);
@@ -535,6 +535,7 @@ static void *worker(void *arg) {
           unsigned long long tm0 = sceKernelGetProcessTimeWide();
           int rm = http_get(url, &buf, &len);
           { static unsigned long long lastlog; if (rm != 0 || sceKernelGetProcessTimeWide() - lastlog > 8000000ULL || len > 60000) { crumb("messaggi: %s, %u byte in %u ms (n=%d)", rm == 0 ? "ok" : "ERRORE", (unsigned)len, (unsigned)((sceKernelGetProcessTimeWide() - tm0) / 1000), msg_limit); lastlog = sceKernelGetProcessTimeWide(); } }
+          if (rm == 0 && len > 20 && len < 300000 && msg_limit <= 60) { static char lj[160]; static unsigned long long lt; unsigned long long nw = sceKernelGetProcessTimeWide(); if (strcmp(lj, oj) || nw - lt > 15000000ULL) { snprintf(lj, sizeof lj, "%s", oj); lt = nw; dc_put("msgcache", oj, buf, len); } }   // ultimi messaggi della chat su disco: la prossima volta si aprono subito
           if (rm == 0) { jv *m = json_parse(buf); free(buf); pthread_mutex_lock(&mu); json_free(pend_msgs); pend_msgs = m; snprintf(pend_msgs_jid, sizeof pend_msgs_jid, "%s", oj); pthread_mutex_unlock(&mu); }
           snprintf(url, sizeof url, "%s/presence/%s", base, e);
           if (http_get(url, &buf, &len) == 0) { jv *m = json_parse(buf); free(buf); pthread_mutex_lock(&mu); snprintf(pres_state, sizeof pres_state, "%s", json_str(m, "state", "")); snprintf(pres_jid, sizeof pres_jid, "%s", oj); pthread_mutex_unlock(&mu); json_free(m); }
@@ -1203,11 +1204,12 @@ static void send_draft(void) {
   draft[0] = 0; reply_id[0] = 0; edit_id[0] = 0; chat_stick = 1; emoji_open = 0;
 }
 static void open_chat(int idx) {
-  if (strcmp(wa_status, "open")) { toast_set(T("Connessione a WhatsApp...")); return; }   // con la lista salvata a schermo, le chat si aprono solo a collegamento avvenuto
+  if (strcmp(wa_status, "open")) { char *tb = NULL; size_t tl = 0; if (dc_get("msgcache", chats[idx].jid, &tb, &tl, 0) == 0) free(tb); else { toast_set(T("Connessione a WhatsApp...")); return; } }   // senza collegamento si aprono solo le chat gia' salvate   // con la lista salvata a schermo, le chat si aprono solo a collegamento avvenuto
   crumb("APRO CHAT idx=%d nome=%.30s gruppo=%d", idx, chats[idx].name, chats[idx].group);
   msg_limit = 30; older_pending = 0; no_more_older = 0; anchor_id[0] = 0; chat_logged_frames = 0;
   cur_chat = idx; screen = S_CHAT; chat_stick = 1; chat_scroll = 0; chat_vel = 0; draft[0] = 0; reply_id[0] = 0; edit_id[0] = 0; emoji_open = 0; menu_open = 0; viewer_open = 0;
-  mcache_store(); if (mcache_take(chats[idx].jid)) crumb("chat dalla memoria: %d messaggi gia' pronti", nmsgs); else { free_msgs(); msgs_jid[0] = 0; }
+  mcache_store(); if (mcache_take(chats[idx].jid)) crumb("chat dalla memoria: %d messaggi gia' pronti", nmsgs); else { free_msgs(); msgs_jid[0] = 0;
+    char *db = NULL; size_t dl = 0; if (dc_get("msgcache", chats[idx].jid, &db, &dl, 0) == 0) { jv *dj = json_parse(db); free(db); if (dj) { pthread_mutex_lock(&mu); json_free(pend_msgs); pend_msgs = dj; snprintf(pend_msgs_jid, sizeof pend_msgs_jid, "%s", chats[idx].jid); pthread_mutex_unlock(&mu); crumb("chat dal disco: %u byte", (unsigned)dl); } } }
   pthread_mutex_lock(&mu); snprintf(open_jid, sizeof open_jid, "%s", chats[idx].jid); pres_state[0] = 0; pthread_mutex_unlock(&mu);
   Job *j = job_new(J_READ, chats[idx].jid); if (j) job_commit();
   chats[idx].unread = 0;
@@ -1313,7 +1315,7 @@ int main(void) {
     pthread_mutex_unlock(&mu);
     int st_open = !strcmp(st, "open");
     int pre = cache_chats_loaded && !st_open && strcmp(st, "qr") && strcmp(st, "loggedout") && nchats > 0;   // lista salvata: si mostra subito, anche se il motore sta ancora collegandosi
-    if (!strcmp(st, "qr") || !strcmp(st, "loggedout")) { static int rmc; if (!rmc) { rmc = 1; sceIoRemove(CHATS_CACHE); cache_chats_loaded = 0; } }   // altro account o sessione chiusa: la lista salvata non vale piu'
+    if (!strcmp(st, "qr") || !strcmp(st, "loggedout")) { static int rmc; if (!rmc) { rmc = 1; sceIoRemove(CHATS_CACHE); cache_chats_loaded = 0; { const char *cd[3] = { "avcache", "thcache", "msgcache" }; for (int q = 0; q < 3; q++) { char dp[96]; snprintf(dp, sizeof dp, "ux0:data/whatsapp/%s", cd[q]); SceUID dd = sceIoDopen(dp); if (dd >= 0) { SceIoDirent de; while (sceIoDread(dd, &de) > 0) { char fp[220]; snprintf(fp, sizeof fp, "%s/%s", dp, de.d_name); sceIoRemove(fp); } sceIoDclose(dd); } } } } }   // altro account o sessione chiusa: la lista salvata non vale piu'
     if ((st_open || pre) && screen == S_LOGIN) screen = S_LIST;
     if (!st_open && !pre && screen != S_LOGIN) screen = S_LOGIN;
 

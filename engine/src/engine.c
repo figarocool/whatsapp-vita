@@ -617,11 +617,14 @@ static void report_exception(JSContext *ctx, const char *where) {
   JSValue ex = JS_GetException(ctx); const char *s = JS_ToCString(ctx, ex); JSValue st = JS_GetPropertyStr(ctx, ex, "stack"); const char *ss = JS_IsUndefined(st) ? NULL : JS_ToCString(ctx, st);
   elog("ERRORE JS (%s): %s%s%s", where, s ? s : "?", ss ? "\n" : "", ss ? ss : ""); JS_FreeCString(ctx, s); JS_FreeCString(ctx, ss); JS_FreeValue(ctx, st); JS_FreeValue(ctx, ex);
 }
-static void drain_jobs(Engine *e) { STAGE("esecuzione JS (promesse)"); JSContext *c1; int r; while ((r = JS_ExecutePendingJob(e->rt, &c1)) != 0) { if (r < 0) report_exception(c1, "job"); } }
+// Le promesse si eseguono a tempo: se una catena di continuazioni (es. l'elaborazione di una cronologia di migliaia di messaggi) dura piu' di ~120 ms
+// si torna al ciclo degli eventi (rete, ping, richieste dell'app) e si riprende al giro dopo. Senza questo il motore restava "fermo" fino a 70 s e WhatsApp chiudeva il collegamento.
+static long long g_drain_until;
+static void drain_jobs(Engine *e) { STAGE("esecuzione JS (promesse)"); JSContext *c1; int r; while ((r = JS_ExecutePendingJob(e->rt, &c1)) != 0) { if (r < 0) report_exception(c1, "job"); if (g_drain_until && now_ms() > g_drain_until) break; } }
 int eng_loop_step(Engine *e, int max_wait_ms) {
   g_beat++; g_beat_ms = now_ms(); STAGE("ciclo eventi");
   { static long long last_mem; long long t = now_ms(); if (t - last_mem > 30000) { last_mem = t; JSMemoryUsage mu; JS_ComputeMemoryUsage(e->rt, &mu); struct mallinfo mi = mallinfo(); elog("memoria motore: JS %.1f MB (%lld oggetti, %lld stringhe); heap totale in uso %.1f MB", mu.malloc_size / 1048576.0, (long long)mu.obj_count, (long long)mu.str_count, mi.uordblks / 1048576.0); } }
-  drain_jobs(e); tcp_service(e); rq_pump(e); if (!JS_IsUndefined(rq_handler) && max_wait_ms > 10) max_wait_ms = 10;   // con il gestore attivo si controlla la coda spesso
+  g_drain_until = now_ms() + 120; drain_jobs(e); tcp_service(e); rq_pump(e); if (!JS_IsUndefined(rq_handler) && max_wait_ms > 10) max_wait_ms = 10; if (JS_IsJobPending(e->rt)) max_wait_ms = 0;   // con il gestore attivo si controlla la coda spesso
   long long now = now_ms(); Timer *best = NULL; for (Timer *t = e->timers; t; t = t->next) if (!best || t->due < best->due) best = t;
   long long wait = max_wait_ms; if (best) { long long d = best->due - now; if (d < 0) d = 0; if (d < wait) wait = d; }
   int nfd = 0, maxfd = -1; fd_set rs; FD_ZERO(&rs); int pending_ssl = 0;
@@ -640,7 +643,7 @@ int eng_loop_step(Engine *e, int max_wait_ms) {
     STAGE("esecuzione JS (timer)"); JSValue r = JS_Call(e->ctx, fn, JS_UNDEFINED, 0, NULL); if (JS_IsException(r)) report_exception(e->ctx, "timer"); JS_FreeValue(e->ctx, r); JS_FreeValue(e->ctx, fn); drain_jobs(e);
     now = now_ms();
   }
-  drain_jobs(e); flush_rejections(e->ctx); tcp_service(e); rq_pump(e); int work = e->timers != NULL || !JS_IsUndefined(rq_handler); for (int i = 0; i < MAXWS; i++) if (e->ws[i].used) work = 1; for (int i = 0; i < MAXHTTP; i++) if (G_http[i].used) work = 1;
+  drain_jobs(e); g_drain_until = 0; flush_rejections(e->ctx); tcp_service(e); rq_pump(e); int work = e->timers != NULL || !JS_IsUndefined(rq_handler) || JS_IsJobPending(e->rt); for (int i = 0; i < MAXWS; i++) if (e->ws[i].used) work = 1; for (int i = 0; i < MAXHTTP; i++) if (G_http[i].used) work = 1;
   return work;
 }
 

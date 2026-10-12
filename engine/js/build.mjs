@@ -25,8 +25,9 @@ const plugin = { name: 'vita-node', setup(b) {
   b.onResolve({ filter: /^pino$/ }, () => ({ path: 'pino', namespace: 'pinostub' }));
   b.onLoad({ filter: /.*/, namespace: 'pinostub' }, () => ({ contents: `
     let n = 0; const N = globalThis.__nat; const t0 = N.mono();
-    const out = (lv) => (o, m) => { if (n++ > 600) return; const msg = typeof o === 'string' ? o : (m || ''); console.log('[wa ' + lv + ' +' + Math.round(N.mono() - t0) + 'ms] ' + msg + (o && o.err ? ' ' + (o.err.message || o.err) : '')); };
-    const mk = () => { const l = { level: 'info', child: () => mk(), trace(){}, debug(){}, info: out('i'), warn: out('w'), error: out('E'), fatal: out('F') }; return l; };
+    const out = (lv) => (o, m) => { if (!globalThis.__wadebug && n++ > 600) return; const msg = typeof o === 'string' ? o : (m || ''); console.log('[wa ' + lv + ' +' + Math.round(N.mono() - t0) + 'ms] ' + msg + (o && o.err ? ' ' + (o.err.message || o.err) : '')); };
+    const dbg = (lv) => { const f = out(lv); return (o, m) => { if (globalThis.__wadebug) f(o, m); }; };
+    const mk = () => { const l = { level: 'info', child: () => mk(), trace: dbg('t'), debug: dbg('d'), info: out('i'), warn: out('w'), error: out('E'), fatal: out('F') }; return l; };
     function pino() { return mk(); } pino.levels = {}; pino.default = pino; module.exports = pino;`, loader: 'js' }));
   // meno chiavi di scambio iniziali: 812 sulla Vita richiedevano quasi un minuto di calcolo; ne bastano poche e si ricaricano quando scendono
   b.onLoad({ filter: /Defaults[\\/]index\.js$/ }, (a) => ({ contents: fs.readFileSync(a.path, 'utf8').replace('INITIAL_PREKEY_COUNT = 812', 'INITIAL_PREKEY_COUNT = 100').replace('MIN_PREKEY_COUNT = 5', 'MIN_PREKEY_COUNT = 10'), loader: 'js', resolveDir: path.dirname(a.path) }));

@@ -9,17 +9,19 @@ const SHARDS = 16, FLUSH_MS = 1500;
 const shardOf = (id) => { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return h % SHARDS; };
 const fixName = (f) => f.replace(/\//g, '__').replace(/:/g, '-');
 
+let GEN = 0;   // ogni sessione ha un numero: dopo una disconnessione la vecchia non puo' piu' riscrivere chiavi e credenziali
 export const useMultiFileAuthState = async (folder) => {
+  const my = ++GEN; globalThis.__authDead = () => { GEN++; };
   mkdirSync(folder);
   const load = (name) => { try { const p = `${folder}/${name}`; if (!existsSync(p)) return null; return JSON.parse(readFileSync(p, 'utf8'), BufferJSON.reviver); } catch (_) { return null; } };
-  const save = (name, obj) => writeFileSync(`${folder}/${name}`, JSON.stringify(obj, BufferJSON.replacer));
+  const save = (name, obj) => my !== GEN ? undefined : writeFileSync(`${folder}/${name}`, JSON.stringify(obj, BufferJSON.replacer));
   const creds = load('creds.json') || initAuthCreds();
   const mem = new Map();            // tipo -> Map(gruppo -> { id: valore })
   const dirty = new Set();          // "tipo|gruppo"
   let timer = null;
   const shard = (type, sh) => { let t = mem.get(type); if (!t) { t = new Map(); mem.set(type, t); } let s = t.get(sh); if (!s) { s = load(`k-${fixName(type)}-${sh}.json`) || {}; t.set(sh, s); } return s; };
   const flush = () => {
-    timer = null;
+    timer = null; if (my !== GEN) { dirty.clear(); return; }
     for (const k of dirty) { const [type, sh] = [k.slice(0, k.lastIndexOf('|')), Number(k.slice(k.lastIndexOf('|') + 1))]; try { save(`k-${fixName(type)}-${sh}.json`, shard(type, sh)); } catch (e) { console.log('salvataggio chiavi fallito:', e && e.message); } }
     dirty.clear();
   };

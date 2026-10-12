@@ -303,6 +303,23 @@ function pluginLastNotif() {   // il plugin scrive "jid<TAB>millisecondi-dall'ac
 }
 setInterval(() => writeLiteFiles(false), 10 * 60 * 1000);
 
+
+// Sessione terminata (disconnessione dal telefono o dall'app): si cancella tutto (credenziali, chiavi, archivio) e si riparte da un QR pulito.
+// La vecchia sessione viene resa inerte, cosi' non riscrive le credenziali ormai revocate (era il motivo del ciclo "Sessione terminata").
+let lastReset = 0;
+function resetSession(reason) {
+  if (Date.now() - lastReset < 5000) return; lastReset = Date.now();
+  log('sessione terminata (' + reason + '): pulizia e nuovo QR');
+  state.status = 'loggedout'; state.me = null; state.qr = null; writeLiteFiles.done = false;
+  try { if (globalThis.__authDead) globalThis.__authDead(); } catch (_) {}
+  try { sock && sock.end && sock.end(undefined); } catch (_) {}
+  chats.clear(); raws.clear(); lazyChats.clear(); reacts.clear(); names.clear(); pnames.clear(); alias.clear(); blocked.clear(); calls.length = 0; dirtyChats.clear(); dirtyMeta = false;
+  try { fs.rmSync(STORE_DIR, { recursive: true, force: true }); fs.mkdirSync(STORE_DIR, { recursive: true }); } catch (_) {}
+  try { fs.rmSync(AUTH, { recursive: true, force: true }); fs.mkdirSync(AUTH, { recursive: true }); } catch (_) {}
+  for (const f of ['ur0:tai/wa_lite.bin', 'ur0:tai/wa_names.txt', 'ur0:tai/wa_lastnotif.txt']) { try { fs.unlinkSync(f); } catch (_) {} }   // il plugin non deve tenere credenziali di una sessione chiusa
+  setTimeout(() => start().catch(console.error), 1500);
+}
+
 // ---------- connessione ----------
 async function start() {
   const first = !B;
@@ -320,11 +337,10 @@ async function start() {
     if (qr) { sync.active = false; state.qr = qr; state.status = 'qr'; console.log('QR pronto: http://localhost:' + PORT + '/qr.png'); }
     if (connection === 'open') { state.status = 'open'; state.qr = null; state.me = sock.user?.id || null; console.log('Connesso', state.me); setTimeout(() => writeLiteFiles(true), 3000); sock.fetchBlocklist().then((l) => { blocked.clear(); for (const j of l || []) if (j) blocked.add(B.jidNormalizedUser(j)); }).catch(() => {}); }
     if (connection === 'close') {
+      if (Date.now() - lastReset < 5000) return;   // chiusura provocata dalla pulizia della sessione: il riavvio lo fa resetSession
       const code = lastDisconnect?.error?.output?.statusCode;
-      if (code === DisconnectReason.loggedOut) {
-        state.status = 'loggedout';
-        fs.rmSync(AUTH, { recursive: true, force: true }); fs.mkdirSync(AUTH, { recursive: true });
-      } else state.status = 'reconnecting';
+      if (code === DisconnectReason.loggedOut) { resetSession('chiusa da WhatsApp'); return; }
+      state.status = 'reconnecting';
       setTimeout(() => start().catch(console.error), 2000);
     }
   });
@@ -860,9 +876,8 @@ http.createServer(async (req, res) => {
     }
     if (p === '/logout' && req.method === 'POST') {
       json(res, 200, { ok: true });
-      try { await sock.logout(); } catch (_) {}
-      chats.clear(); raws.clear(); reacts.clear(); names.clear(); pnames.clear(); alias.clear(); blocked.clear(); calls.length = 0;
-      try { fs.rmSync(STORE_DIR, { recursive: true, force: true }); fs.mkdirSync(STORE_DIR, { recursive: true }); dirtyChats.clear(); } catch (_) {}
+      try { await Promise.race([sock.logout(), new Promise((r) => setTimeout(r, 6000))]); } catch (_) {}
+      resetSession('disconnessione richiesta');
       return;
     }
 

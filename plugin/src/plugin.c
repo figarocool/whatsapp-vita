@@ -175,7 +175,7 @@ static char seen_ids[48][56]; static int seen_n;
 static int seen_before(const char *id) { if (!id[0]) return 0; for (int i = 0; i < 48; i++) if (!strcmp(seen_ids[i], id)) return 1; strcpy(seen_ids[seen_n++ % 48], id); return 0; }
 static int numeric_name(const char *s) { if (!*s) return 1; for (; *s; s++) if ((*s < '0' || *s > '9') && *s != '+' && *s != ' ') return 0; return 1; }
 static int burst; static unsigned burst_t0;
-static void write_lastnotif(const char *jid) { SceUID f = sceIoOpen(LASTNOTIF, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (f >= 0) { sceIoWrite(f, jid, strlen(jid)); sceIoClose(f); } }
+static void write_lastnotif(const char *jid) { char b[200]; int n = snprintf(b, sizeof b, "%s\t%u", jid, (unsigned)(sceKernelGetSystemTimeWide() / 1000)); SceUID f = sceIoOpen(LASTNOTIF, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (f >= 0) { sceIoWrite(f, b, n); sceIoClose(f); } }
 static void on_node(const LiteNode *n, void *ud) {
   (void)ud; if (strcmp(n->tag, "message")) return;
   if (!strcmp(n->category, "peer") || !strcmp(n->type, "reaction")) return;

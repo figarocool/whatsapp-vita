@@ -101,6 +101,12 @@ static JSValue js_clear_timer(JSContext *ctx, JSValueConst this_val, int argc, J
   return JS_UNDEFINED;
 }
 static JSValue js_now(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) { struct timeval tv; gettimeofday(&tv, NULL); return JS_NewFloat64(ctx, (double)tv.tv_sec * 1000.0 + tv.tv_usec / 1000.0); }
+#ifdef __vita__
+#include <psp2/kernel/processmgr.h>
+static JSValue js_sysup(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) { return JS_NewFloat64(ctx, (double)(sceKernelGetSystemTimeWide() / 1000ULL)); }   // millisecondi dall'accensione: lo stesso orologio del plugin
+#else
+static JSValue js_sysup(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) { return JS_NewFloat64(ctx, (double)now_ms()); }
+#endif
 static JSValue js_mono(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) { return JS_NewFloat64(ctx, (double)now_ms()); }
 
 // ---------- casuali ----------
@@ -689,7 +695,7 @@ Engine *eng_new(const char *cacert_path, const char *data_dir, EngineLog log) {
   JS_SetPropertyStr(ctx, g, "setTimeout", JS_NewCFunctionMagic(ctx, (JSCFunctionMagic *)js_set_timer, "setTimeout", 2, JS_CFUNC_generic_magic, 0));
   JS_SetPropertyStr(ctx, g, "setInterval", JS_NewCFunctionMagic(ctx, (JSCFunctionMagic *)js_set_timer, "setInterval", 2, JS_CFUNC_generic_magic, 1));
   JS_SetPropertyStr(ctx, g, "clearTimeout", JS_NewCFunction(ctx, js_clear_timer, "clearTimeout", 1)); JS_SetPropertyStr(ctx, g, "clearInterval", JS_NewCFunction(ctx, js_clear_timer, "clearInterval", 1));
-  FN("now", js_now, 0); FN("mono", js_mono, 0); FN("randomBytes", js_random, 1);
+  FN("now", js_now, 0); FN("sysUptimeMs", js_sysup, 0); FN("mono", js_mono, 0); FN("randomBytes", js_random, 1);
   FN("hashNew", js_hash_new, 2); FN("hashUpdate", js_hash_update, 2); FN("hashFinal", js_hash_final, 1);
   FN("cipherNew", js_cipher_new, 4); FN("cipherAad", js_cipher_aad, 2); FN("cipherTag", js_cipher_tag, 2); FN("cipherUpdate", js_cipher_update, 2); FN("cipherFinal", js_cipher_final, 1);
   FN("fsRead", js_fs_read, 1); FN("fsWrite", js_fs_write, 2); FN("fsUnlink", js_fs_unlink, 1); FN("fsMkdir", js_fs_mkdir, 1); FN("fsExists", js_fs_exists, 1); FN("fsList", js_fs_list, 1); FN("fsStat", js_fs_stat, 1); FN("fsRename", js_fs_rename, 2); FN("fsAppend", js_fs_append, 2); FN("fsReadRange", js_fs_read_range, 3);

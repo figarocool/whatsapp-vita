@@ -291,9 +291,14 @@ function writeLiteFiles(force) {
     fs.writeFileSync(LITE_DIR + 'wa_names.txt', txt + '\n');
   } catch (e) { log('plugin: file non scritti:', e.message); }
 }
-function pluginLastNotif() {   // il plugin scrive il jid della chat dell'ultima notifica; vale 10 minuti
+function pluginLastNotif() {   // il plugin scrive "jid<TAB>millisecondi-dall'accensione"; vale 10 minuti
   if (!ENGINE) return null;
-  try { const st = fs.statSync(LITE_DIR + 'wa_lastnotif.txt'); if (Date.now() - st.mtimeMs > 10 * 60 * 1000) return null; const j = fs.readFileSync(LITE_DIR + 'wa_lastnotif.txt', 'utf8').trim(); return j || null; } catch (_) { return null; }
+  try {
+    const t = fs.readFileSync(LITE_DIR + 'wa_lastnotif.txt', 'utf8').trim().split('\t'); const age = globalThis.__nat.sysUptimeMs() - (parseInt(t[1], 10) || 0);
+    if (!t[0] || age < -5000 || age > 10 * 60 * 1000) return null;
+    const cand = [t[0], alias.get(t[0]), norm(t[0])]; for (const j of cand) if (j && chats.has(j)) return j;   // la chat puo' essere nota con l'altro indirizzo (numero o lid)
+    return t[0];
+  } catch (_) { return null; }
 }
 setInterval(() => writeLiteFiles(false), 10 * 60 * 1000);
 

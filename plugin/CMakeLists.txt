@@ -19,7 +19,7 @@ target_compile_definitions(wa_notify PRIVATE LITE_PLUGIN C25519_NO_TABLE MBEDTLS
 target_include_directories(wa_notify PRIVATE ../app/src lite ../engine/lite ../engine/src ${MBED_SRC}/include ${MBED_SRC}/library)
 target_compile_options(wa_notify PRIVATE -Os -ffunction-sections -fdata-sections -fno-builtin -fno-tree-loop-distribute-patterns -w)
 target_link_libraries(wa_notify
-  taihen_stub SceSysmodule_stub SceKernelModulemgr_stub
+  taihen_stub SceSysmem_stub SceSysmodule_stub SceKernelModulemgr_stub
   SceIofilemgr_stub SceKernelThreadMgr_stub SceProcessmgr_stub SceLibKernel_stub gcc)
 set_target_properties(wa_notify PROPERTIES LINK_FLAGS "-nostdlib -Wl,--gc-sections -Wl,-u,module_start -Wl,-u,module_stop")
 vita_create_self(wa_notify.suprx wa_notify CONFIG exports.yml UNSAFE)

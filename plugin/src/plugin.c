@@ -1,6 +1,7 @@
 // Plugin taiHEN per la shell: interroga /events del bridge e mostra una notifica di sistema per ogni nuovo messaggio.
 // Installazione: copia wa_notify.suprx in ur0:tai/ e aggiungi a ur0:tai/config.txt, sotto *main:  ur0:tai/wa_notify.suprx
 #include <psp2/kernel/modulemgr.h>
+#include <psp2/kernel/sysmem.h>
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/io/fcntl.h>
@@ -131,14 +132,11 @@ void heap_init(void *base, size_t size); size_t heap_free_bytes(void);
 int lv_net_resolve(void); int lv_net_init(void);
 
 static SceUID heap_blk = -1;
-typedef SceUID (*alloc_fn)(const char *, unsigned, SceSize, void *); typedef int (*base_fn)(SceUID, void **);
-static int heap_ready(void) {   // memoria per il client: si chiede a runtime (SceSysmem non e' un import fisso, come per le altre librerie)
+static int heap_ready(void) {
   if (heap_blk >= 0) return 1; if (heap_blk == -2) return 0;
-  uintptr_t fa = 0, fb = 0; int e1 = taiGetModuleExportFunc("SceSysmem", TAI_ANY_LIBRARY, 0xB9D5EBDEu, &fa), e2 = taiGetModuleExportFunc("SceSysmem", TAI_ANY_LIBRARY, 0xA841EDDAu, &fb);
-  if (e1 < 0 || e2 < 0 || !fa || !fb) { plog("funzioni di memoria non trovate (0x%x)", e1 < 0 ? e1 : e2, 0); heap_blk = -2; return 0; }
-  heap_blk = ((alloc_fn)fa)("wa_lite_heap", 0x0C20D060u /* USER_RW */, (HEAP_BYTES + 0xFFF) & ~0xFFF, NULL);
+  heap_blk = sceKernelAllocMemBlock("wa_lite_heap", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, (HEAP_BYTES + 0xFFF) & ~0xFFF, NULL);
   if (heap_blk < 0) { plog("memoria del client leggero non disponibile: 0x%x", heap_blk, 0); heap_blk = -2; return 0; }
-  void *base = NULL; ((base_fn)fb)(heap_blk, &base); heap_init(base, HEAP_BYTES); plog("memoria del client leggero pronta (%d KB)", HEAP_BYTES / 1024, 0); return 1;
+  void *base = NULL; sceKernelGetMemBlockBase(heap_blk, &base); heap_init(base, HEAP_BYTES); plog("memoria del client leggero pronta (%d KB)", HEAP_BYTES / 1024, 0); return 1;
 }
 static uint8_t cred[2048]; static int cred_len; static uint8_t npriv[32], npub[32]; static const uint8_t *login_pl; static size_t login_pl_len; static char my_user[32];
 static int load_creds(void) {

@@ -34,6 +34,10 @@ static void *t_alloc(void *arg, uint32_t al, uint32_t sz) {
 static void t_free(void *arg, void *p) {
   (void)arg; for (int i = 0; i < 24; i++) if (tex_blk[i].base == p) { vita2d_wait_rendering_done(); sceGxmUnmapMemory(p); sceKernelFreeMemBlock(tex_blk[i].uid); tex_blk[i].base = NULL; return; }
 }
+// blocchi CDRAM rimasti allocati dopo la chiusura del lettore (il decodificatore non li restituisce sempre): senza questo, dopo qualche video la memoria finisce e i video non partono piu'
+static void tex_blk_free_all(void) {
+  int any = 0; for (int i = 0; i < 24; i++) if (tex_blk[i].base) { if (!any) { vita2d_wait_rendering_done(); any = 1; } sceGxmUnmapMemory(tex_blk[i].base); sceKernelFreeMemBlock(tex_blk[i].uid); tex_blk[i].base = NULL; }
+}
 static unsigned frames_seen;
 static unsigned a_frames; static int a_ch, a_rate, a_size, a_grain, a_open_rc = 1;
  static int seen_active; static unsigned long long open_at;
@@ -101,7 +105,7 @@ static int wav_open(const char *path) {
 static void wav_close(void) { if (!wav_mode) return; wav_run = 0; if (wav_thr_on) pthread_join(wav_thr, NULL); wav_thr_on = 0; if (wav_port >= 0) { sceAudioOutReleasePort(wav_port); wav_port = -1; } free(wav_buf); wav_buf = NULL; wav_mode = 0; }
 
 int player_open(const char *path, int loop) {
-  player_close();
+  player_close(); tex_blk_free_all();
   if (wav_open(path) == 0) return 0;   // vocale WAV: niente AvPlayer
   sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER);
   SceAvPlayerInitData d; memset(&d, 0, sizeof d);
@@ -118,7 +122,7 @@ void player_close(void) {
   wav_close();
   if (!open_ok) return;
   running = 0; if (audio_thr_on) pthread_join(audio_thr, NULL); audio_thr_on = 0;
-  sceAvPlayerStop(h); sceAvPlayerClose(h); h = 0; open_ok = 0;
+  sceAvPlayerStop(h); sceAvPlayerClose(h); h = 0; open_ok = 0; tex_blk_free_all();
   if (audio_port >= 0) { sceAudioOutReleasePort(audio_port); audio_port = -1; }
   if (tex) { vita2d_wait_rendering_done(); vita2d_free_texture(tex); tex = NULL; } tex_w = tex_h = 0;
 }

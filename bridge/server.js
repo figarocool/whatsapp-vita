@@ -733,7 +733,8 @@ http.createServer(async (req, res) => {
     }
     if (p === '/send' && req.method === 'POST') {
       const { jid, text, quote, edit } = JSON.parse((await readBody(req, 1e6)).toString());
-      await sendText(jid, text, quote, edit);
+      const t0 = Date.now(); log('invio: inizio', jid); const hb = setInterval(() => log('invio: ancora in corso da', Math.round((Date.now() - t0) / 1000), 's'), 8000);
+      try { await sendText(jid, text, quote, edit); log('invio: riuscito in', Date.now() - t0, 'ms'); } catch (e) { log('invio: ERRORE dopo', Date.now() - t0, 'ms:', e && e.message || e); throw e; } finally { clearInterval(hb); }
       return json(res, 200, { ok: true });
     }
     if (p === '/sendmedia' && req.method === 'POST') {

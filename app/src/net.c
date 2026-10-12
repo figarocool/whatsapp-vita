@@ -82,7 +82,7 @@ int http_download_file(const char *url, const char *path, long timeout_s, dl_pro
   return 0;
 }
 int http_post_json(const char *url, const char *body) {
-  if (is_eng(url)) return eng_call("POST", url, body, strlen(body), "application/json", 20, NULL, NULL, NULL);
+  if (is_eng(url)) { int st = 0; int rc = eng_call("POST", url, body, strlen(body), "application/json", 90, NULL, NULL, &st); return rc != 0 || st >= 400 ? -1 : 0; }   // errore anche se il motore risponde 500
   CURL *c = curl_easy_init(); if (!c) return -1;
   Buf b = { 0 };
   struct curl_slist *h = curl_slist_append(NULL, "Content-Type: application/json");

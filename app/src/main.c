@@ -542,7 +542,7 @@ static void *worker(void *arg) {
           if (http_get(url, &buf, &len) == 0) { jv *c = json_parse(buf); free(buf); pthread_mutex_lock(&mu); json_free(pend_prof); pend_prof = c; pthread_mutex_unlock(&mu); }
         }
         // media in coda (fino a 3 per giro), poi un avatar
-        for (int n = 0; n < 3; n++) {
+        for (int n = 0, netn = 0; n < 60 && netn < 3 && !quit_flag; n++) {
           char mj[160] = "", mid[64] = ""; int mi = -1;
           pthread_mutex_lock(&mu);
           for (int i = 0; i < nmed; i++) if (med[i].state == 0) { snprintf(mj, sizeof mj, "%s", med[i].jid); snprintf(mid, sizeof mid, "%s", med[i].id); med[i].state = 3; mi = i; break; }
@@ -553,7 +553,7 @@ static void *worker(void *arg) {
           unsigned long long tm1 = sceKernelGetProcessTimeWide();
           char ck[260]; snprintf(ck, sizeof ck, "%s|%s", mj, mid);
           int r = dc_get("thcache", ck, &buf, &len, 0); int from_disk = (r == 0);
-          if (r != 0) r = http_get(url, &buf, &len);
+          if (r != 0) { r = http_get(url, &buf, &len); netn++; }
           if (r == 0 && !from_disk && len != 2113) dc_put("thcache", ck, buf, len);   // il riquadro di riserva dei video senza miniatura non si salva
           crumb("media %.12s: %s %u byte in %u ms%s", mid, r == 0 ? "ok" : "ERRORE", (unsigned)len, (unsigned)((sceKernelGetProcessTimeWide() - tm1) / 1000), from_disk ? " (disco)" : "");
           pthread_mutex_lock(&mu);
@@ -581,21 +581,26 @@ static void *worker(void *arg) {
             pthread_mutex_unlock(&mu); free(buf); buf = NULL;
           }
         }
-        char aj[160] = "";
-        pthread_mutex_lock(&mu);
-        for (int i = 0; i < nav; i++) if (avs[i].state == 0) { snprintf(aj, sizeof aj, "%s", avs[i].jid); avs[i].state = 3; break; }
-        pthread_mutex_unlock(&mu);
-        if (aj[0]) {
-          char e[400]; url_enc(aj, e, sizeof e);
-          snprintf(url, sizeof url, "%s/avatar/%s", base, e);
+        // foto profilo: quelle gia' salvate su disco si prendono tutte subito, poi una sola dal motore per giro
+        for (int guard = 0; guard < 400 && !quit_flag; guard++) {
+          char aj[160] = "";
+          pthread_mutex_lock(&mu);
+          for (int i = 0; i < nav; i++) if (avs[i].state == 0) { snprintf(aj, sizeof aj, "%s", avs[i].jid); avs[i].state = 3; break; }
+          pthread_mutex_unlock(&mu);
+          if (!aj[0]) break;
           int r = dc_get("avcache", aj, &buf, &len, 3 * 86400); int av_disk = (r == 0);
-          if (r != 0) { r = http_get(url, &buf, &len); if (r == 0) dc_put("avcache", aj, buf, len); else { free(buf); buf = NULL; len = 0; if (dc_get("avcache", aj, &buf, &len, 0) == 0) r = 0; } }   // foto vecchia di piu' di 3 giorni: si riscarica; se non si riesce, resta quella salvata
-          (void)av_disk;
-          { static int avn; if (r != 0 || (++avn % 10) == 0) crumb("avatar #%d: %s %u byte", avn, r == 0 ? "ok" : "assente", (unsigned)len); }
+          if (r != 0) {
+            char e[400]; url_enc(aj, e, sizeof e);
+            snprintf(url, sizeof url, "%s/avatar/%s", base, e);
+            r = http_get(url, &buf, &len);
+            if (r == 0) dc_put("avcache", aj, buf, len); else { free(buf); buf = NULL; len = 0; if (dc_get("avcache", aj, &buf, &len, 0) == 0) r = 0; }   // foto vecchia di piu' di 3 giorni: si riscarica; se non si riesce, resta quella salvata
+            { static int avn; if (r != 0 || (++avn % 10) == 0) crumb("avatar #%d: %s %u byte", avn, r == 0 ? "ok" : "assente", (unsigned)len); }
+          }
           pthread_mutex_lock(&mu);
           Avatar *a = av_find(aj, 0);
           if (a) { if (r == 0 && len > 100) { a->raw = (unsigned char *)buf; a->rawlen = len; a->state = 1; buf = NULL; } else a->state = 2; }
-          pthread_mutex_unlock(&mu); free(buf);
+          pthread_mutex_unlock(&mu); free(buf); buf = NULL;
+          if (!av_disk) break;   // dal motore ne basta una per giro: le altre aspettano
         }
       }
     } else { static int warned; if (!warned) { crumb("bridge non raggiungibile: %s", base); warned = 1; } pthread_mutex_lock(&mu); net_ok = 0; pthread_mutex_unlock(&mu); if (!last_scan || tick - last_scan > 40) { last_scan = tick ? tick : 1; scan_bridge(); } }

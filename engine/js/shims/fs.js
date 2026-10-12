@@ -11,7 +11,8 @@ export const existsSync = (p) => N.fsExists(String(p));
 export const mkdirSync = (p) => { N.fsMkdir(String(p)); };
 export const readdirSync = (p) => N.fsList(String(p));
 export const unlinkSync = (p) => { if (!N.fsUnlink(String(p))) throw err('ENOENT', 'no such file or directory', p); };
-export const rmSync = (p, o) => { N.fsUnlink(String(p)); };
+const rmrf = (p) => { const st = N.fsStat(p); if (!st) return; if (st.isDir) { for (const n of N.fsList(p) || []) rmrf(p + '/' + n); } N.fsUnlink(p); };   // cartelle comprese: remove() da sola non toglie quelle piene
+export const rmSync = (p, o) => { p = String(p); if (o && o.recursive) rmrf(p); else N.fsUnlink(p); };
 export const renameSync = (a, b) => { if (!N.fsRename(String(a), String(b))) throw err('EIO', 'rename fallito', a); };
 export const statSync = (p) => { const s = N.fsStat(String(p)); if (!s) throw err('ENOENT', 'no such file or directory', p); return { size: s.size, mtimeMs: s.mtimeMs, mtime: new Date(s.mtimeMs), isFile: () => !s.isDir, isDirectory: () => s.isDir }; };
 export const copyFileSync = (a, b) => writeFileSync(b, readFileSync(a));

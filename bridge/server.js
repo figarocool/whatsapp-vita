@@ -406,7 +406,7 @@ function runFfmpeg(args, durSec, onPct, bg, holder) {
   });
 }
 function prepStart(jid, id, kind, bg) {
-  const key = sha1hex(jid + '|' + id + '|' + kind + '|r10'), old = preps.get(key);
+  const key = sha1hex(jid + '|' + id + '|' + kind + '|r11'), old = preps.get(key);
   // se l'utente chiede un file che sta convertendo in background a bassa priorita', si ferma e si rifa' a priorita' normale
   if (old && old.bg && !bg) {
     old.bg = false;   // da ora ha la priorita' dell'utente
@@ -440,7 +440,7 @@ function prepStart(jid, id, kind, bg) {
 // Video in arrivo (storie e chat): si convertono in background, uno alla volta, cosi' sulla Vita sono gia' pronti.
 const bgQueue = []; let bgBusy = false;
 function bgPrep(jid, id) {
-  const key = sha1hex(jid + '|' + id + '|video|r10'); const x = preps.get(key);
+  const key = sha1hex(jid + '|' + id + '|video|r11'); const x = preps.get(key);
   if ((x && x.state !== 'error') || bgQueue.some((t) => t[2] === key)) return;
   if (fs.existsSync(path.join(VIDEO_DIR, key + '.mp4'))) return;
   bgQueue.push([jid, id, key]); bgNext();
@@ -486,18 +486,25 @@ function prefetchChat(jid, n) {
   const list = [...(raws.get(jid)?.values() || [])].sort((a, b) => num(b.messageTimestamp) - num(a.messageTimestamp));
   let c = 0; for (const m of list) { if (c >= n) break; const d = describe(m); if (d && (d.kind === 'image' || d.kind === 'sticker')) { prefetchMedia(jid, m.key.id); c++; } }
 }
+// la miniatura puo' essere un Buffer, un Uint8Array, {type:'Buffer',data} oppure una stringa base64 (come nei messaggi arrivati in diretta)
+function thumbBuf(th) {
+  if (!th) return null;
+  if (typeof th === 'string') return Buffer.from(th, 'base64');
+  if (th.type === 'Buffer' && th.data) return Buffer.from(th.data, typeof th.data === 'string' ? 'base64' : undefined);
+  return Buffer.from(th);
+}
 const VIDEO_PLACEHOLDER = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAC0AUADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDhqKKKoQUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFTWVv9rvre23bPOkWPdjOMnGcVc1bQ7/AEgg3UamNjhZUOVJxnHqPxA6GgDNooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAu6L/wAhyw/6+Y//AEIV6y6JIjJIqsjAhlYZBB7GvJtF/wCQ5Yf9fMf/AKEK9boA5jVvBtndbpbBvssxydnWNjz2/h5x04AHSuIv9OvNOlEd7bvEx6E8hunQjg9R0r16mTQxXERiniSWNuqOoYH8DQI8aortdZ8FBi02kOq8f8e7k9h2Y+vHB9+a5C7tLmynMN3C8Ug7MMZGcZHqOOooGQ0UUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFAF3Rf+Q5Yf9fMf/oQr1uvJNF/5Dlh/wBfMf8A6EK9boAKKKKBBVe+sbXULc295CssZIODkYI7gjkVYooA4TVfBM8WZNLl89f+eUhAft0PQ9z2/GuTdHjdkkVldSQysMEEdjXsk00VvEZZ5UijXq7sFA/E1wPibxBp+pZitrBJWXgXMoKtjn7uOcc5GT9RQM5iiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigC7ov/IcsP+vmP/0IV63Xkmi/8hyw/wCvmP8A9CFet0AFFFc9qvi7TrHKW5+2TekbfIOnVvoe2enagRvu6RozyMqooJZmOAAO5rmNZ8ZWtsGi0zbczg43kHyxzz6E9O3HOc9q5DVtZvtWl3XUmEGNsSZCKR3xnryefes+gZav9RvNRlEl7cPKw6A8BenQDgdB0qrRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAXdF/5Dlh/wBfMf8A6EK9E1rxDY6QpWRvOuOghjIyDjI3f3R0/Poa8vR3jdXjZldSCrKcEEdxSUAbWreJ9R1PdH5n2e3OR5URxkc/ePU8HB7e1YtFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFAH/2Q==';
 async function mediaForRaw(jid, id) {
   const k = jid + '|' + id; if (mediaCache.has(k)) return mediaCache.get(k);
   for (const [ext, type] of [['.jpg', 'image/jpeg'], ['.png', 'image/png']]) { try { const buf = fs.readFileSync(mediaFile(k) + ext); const out0 = { type, buf }; cacheSet(k, out0); return out0; } catch (_) {} }
   const m = raws.get(jid)?.get(id); if (!m) return null;
   const d = describe(m); let out = null;
-  if ((d.kind === 'image' || d.kind === 'video') && m.key.remoteJid.endsWith('@newsletter')) { const th = unwrap(m).imageMessage?.jpegThumbnail || unwrap(m).videoMessage?.jpegThumbnail; if (th) out = { type: 'image/jpeg', buf: await sharp(Buffer.from(th)).resize(320, null).jpeg({ quality: 80 }).toBuffer() }; }
+  if ((d.kind === 'image' || d.kind === 'video') && m.key.remoteJid.endsWith('@newsletter')) { const th = thumbBuf(unwrap(m).imageMessage?.jpegThumbnail || unwrap(m).videoMessage?.jpegThumbnail); if (th) out = { type: 'image/jpeg', buf: await sharp(th).resize(320, null).jpeg({ quality: 80 }).toBuffer() }; }
   else if (d.kind === 'image') out = { type: 'image/jpeg', buf: await sharp(await download(m)).rotate().resize(480, 480, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 72 }).toBuffer() };
   else if (d.kind === 'sticker') out = { type: 'image/png', buf: await sharp(await download(m), { animated: false }).resize(192, 192, { fit: 'inside', withoutEnlargement: true }).png().toBuffer() };
   else if (d.kind === 'video') {
-    const th = unwrap(m).videoMessage?.jpegThumbnail;
-    if (th) { try { out = { type: 'image/jpeg', buf: await sharp(Buffer.from(th)).resize(320, null).jpeg({ quality: 80 }).toBuffer() }; } catch (e) { log('miniatura video non leggibile:', e.message); } }
+    const th = thumbBuf(unwrap(m).videoMessage?.jpegThumbnail);
+    if (th) { try { out = { type: 'image/jpeg', buf: await sharp(th).resize(320, null).jpeg({ quality: 80 }).toBuffer() }; } catch (e) { log('miniatura video non leggibile:', e.message); } }
     else log('video senza miniatura nel messaggio:', id);
     if (!out) return { type: 'image/jpeg', buf: Buffer.from(VIDEO_PLACEHOLDER, 'base64') };   // senza miniatura: riquadro scuro con il simbolo di play (non si salva: se la miniatura arriva dopo, si usa quella)
   }

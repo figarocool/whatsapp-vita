@@ -256,6 +256,20 @@ static int alive_state(void) {
 }
 static const char *base_name(const char *p) { const char *s = strrchr(p, '/'); const char *c = strrchr(p, ':'); if (c && (!s || c > s)) s = c; return s ? s + 1 : p; }
 
+// Cache su disco di foto profilo e anteprime: all'avvio si mostrano subito, senza aspettare il motore (che nei primi secondi e' occupato).
+static void dc_path(const char *dir, const char *key, char *out, size_t n) { unsigned long long h = 1469598103934665603ULL; for (const char *p = key; *p; p++) { h ^= (unsigned char)*p; h *= 1099511628211ULL; } snprintf(out, n, "ux0:data/whatsapp/%s/%016llx.jpg", dir, h); }
+static int dc_get(const char *dir, const char *key, char **buf, size_t *len, int max_age_s) {
+  char p[200]; dc_path(dir, key, p, sizeof p); if (max_age_s > 0) { int a = file_age_sec(p); if (a < 0 || a > max_age_s) return -1; }
+  size_t l = 0; unsigned char *b = read_file(p, &l); if (!b || l < 100) { free(b); return -1; } *buf = (char *)b; *len = l; return 0;
+}
+static unsigned long long dc_written;
+static void dc_put(const char *dir, const char *key, const char *buf, size_t len) {
+  if (len < 100 || len > 2 * 1024 * 1024 || dc_written > 60ULL * 1024 * 1024) return;   // tetto di 60 MB scritti per sessione
+  static int made; if (!made) { made = 1; sceIoMkdir("ux0:data/whatsapp", 0777); sceIoMkdir("ux0:data/whatsapp/avcache", 0777); sceIoMkdir("ux0:data/whatsapp/thcache", 0777); }
+  char p[200], t[210]; dc_path(dir, key, p, sizeof p); snprintf(t, sizeof t, "%s.tmp", p);
+  SceUID f = sceIoOpen(t, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (f < 0) return; int w = sceIoWrite(f, buf, len); sceIoClose(f);
+  if (w == (int)len) { sceIoRemove(p); sceIoRename(t, p); dc_written += len; } else sceIoRemove(t);
+}
 static void run_job(Job *j, const char *base) {
   char url[1400], e1[500], e2[500], e3[300], e4[300];
   crumb("job %d %s", j->type, j->path);
@@ -537,8 +551,11 @@ static void *worker(void *arg) {
           char e[400], e2[200]; url_enc(mj, e, sizeof e); url_enc(mid, e2, sizeof e2);
           snprintf(url, sizeof url, "%s/media/%s/%s", base, e, e2);
           unsigned long long tm1 = sceKernelGetProcessTimeWide();
-          int r = http_get(url, &buf, &len);
-          crumb("media %.12s: %s %u byte in %u ms", mid, r == 0 ? "ok" : "ERRORE", (unsigned)len, (unsigned)((sceKernelGetProcessTimeWide() - tm1) / 1000));
+          char ck[260]; snprintf(ck, sizeof ck, "%s|%s", mj, mid);
+          int r = dc_get("thcache", ck, &buf, &len, 0); int from_disk = (r == 0);
+          if (r != 0) r = http_get(url, &buf, &len);
+          if (r == 0 && !from_disk && len != 2113) dc_put("thcache", ck, buf, len);   // il riquadro di riserva dei video senza miniatura non si salva
+          crumb("media %.12s: %s %u byte in %u ms%s", mid, r == 0 ? "ok" : "ERRORE", (unsigned)len, (unsigned)((sceKernelGetProcessTimeWide() - tm1) / 1000), from_disk ? " (disco)" : "");
           pthread_mutex_lock(&mu);
           for (int i = 0; i < nmed; i++) if (!strcmp(med[i].jid, mj) && !strcmp(med[i].id, mid)) {
             if (r == 0 && len > 100) { med[i].raw = (unsigned char *)buf; med[i].rawlen = len; med[i].state = 1; buf = NULL; } else med[i].state = 2;
@@ -571,7 +588,9 @@ static void *worker(void *arg) {
         if (aj[0]) {
           char e[400]; url_enc(aj, e, sizeof e);
           snprintf(url, sizeof url, "%s/avatar/%s", base, e);
-          int r = http_get(url, &buf, &len);
+          int r = dc_get("avcache", aj, &buf, &len, 3 * 86400); int av_disk = (r == 0);
+          if (r != 0) { r = http_get(url, &buf, &len); if (r == 0) dc_put("avcache", aj, buf, len); else { free(buf); buf = NULL; len = 0; if (dc_get("avcache", aj, &buf, &len, 0) == 0) r = 0; } }   // foto vecchia di piu' di 3 giorni: si riscarica; se non si riesce, resta quella salvata
+          (void)av_disk;
           { static int avn; if (r != 0 || (++avn % 10) == 0) crumb("avatar #%d: %s %u byte", avn, r == 0 ? "ok" : "assente", (unsigned)len); }
           pthread_mutex_lock(&mu);
           Avatar *a = av_find(aj, 0);

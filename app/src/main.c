@@ -195,10 +195,13 @@ static void toast_set(const char *t) { pthread_mutex_lock(&mu); snprintf(toast_t
 typedef struct { char jid[160]; int state; unsigned char *raw; size_t rawlen; vita2d_texture *tex; } Avatar; // 0 da chiedere,1 raw pronto,2 fatto,3 in corso
 #define MAXAV 160
 static Avatar avs[MAXAV]; static int nav;
+static int dc_get(const char *dir, const char *key, char **buf, size_t *len, int max_age_s);   // cache su disco (piu' avanti)
 static Avatar *av_find(const char *jid, int create) {
   for (int i = 0; i < nav; i++) if (!strcmp(avs[i].jid, jid)) return &avs[i];
   if (!create || nav >= MAXAV) return NULL;
-  Avatar *a = &avs[nav++]; memset(a, 0, sizeof *a); snprintf(a->jid, sizeof a->jid, "%s", jid); return a;
+  Avatar *a = &avs[nav++]; memset(a, 0, sizeof *a); snprintf(a->jid, sizeof a->jid, "%s", jid);
+  { char *b = NULL; size_t l = 0; if (dc_get("avcache", jid, &b, &l, 3 * 86400) == 0) { a->raw = (unsigned char *)b; a->rawlen = l; a->state = 1; } }   // gia' salvata sul disco: pronta subito, senza aspettare il motore
+  return a;
 }
 typedef struct { char key[240]; char jid[160]; char id[64]; int state; unsigned char *raw; size_t rawlen; vita2d_texture *tex; unsigned last; int bstate; unsigned char *braw; size_t brawlen; vita2d_texture *big; } Media; // 0 da chiedere
 #define MAXMED 24
@@ -488,9 +491,12 @@ static void spawn_long_job(const Job *j, const char *base) {
   pthread_t th; if (pthread_create(&th, &at, long_job_main, lj) != 0) { free(lj); __sync_fetch_and_sub(&long_jobs, 1); }
   pthread_attr_destroy(&at);
 }
+#define CHATS_CACHE "ux0:data/whatsapp/chats_cache.json"
+static volatile int cache_chats_loaded;
 static void *worker(void *arg) {
   (void)arg;
   unsigned tick = 0, last_scan = 0;
+  { size_t cl = 0; unsigned char *cb = read_file(CHATS_CACHE, &cl); if (cb) { jv *c = json_parse((char *)cb); free(cb); if (c) { pthread_mutex_lock(&mu); json_free(pend_chats); pend_chats = c; cache_chats_loaded = 1; pthread_mutex_unlock(&mu); crumb("lista chat salvata caricata (%u byte)", (unsigned)cl); } } }   // la lista compare subito, mentre il motore si collega
   while (!quit_flag) {
     char url[700], *buf = NULL; size_t len = 0;
     char base[256]; pthread_mutex_lock(&mu); snprintf(base, sizeof base, "%s", base_url); pthread_mutex_unlock(&mu);
@@ -535,7 +541,7 @@ static void *worker(void *arg) {
         }
         if (!oj[0] || tick % 6 == 0) {   // leggendo una chat la lista (26 KB) basta ogni tanto: i messaggi hanno la precedenza
         snprintf(url, sizeof url, "%s/chats?limit=%d", base, chat_limit);
-        if (http_get(url, &buf, &len) == 0) { { static size_t lastl; if (len / 4096 != lastl / 4096) crumb("risposta /chats %u byte", (unsigned)len); lastl = len; } jv *c = json_parse(buf); free(buf); pthread_mutex_lock(&mu); json_free(pend_chats); pend_chats = c; pthread_mutex_unlock(&mu); }
+        if (http_get(url, &buf, &len) == 0) { { static size_t lastl; if (len / 4096 != lastl / 4096) crumb("risposta /chats %u byte", (unsigned)len); lastl = len; } { static unsigned long long lsv; unsigned long long nw = sceKernelGetProcessTimeWide(); if (len > 50 && len < 600000 && nw - lsv > 30000000ULL) { lsv = nw; sceIoMkdir("ux0:data/whatsapp", 0777); SceUID sf = sceIoOpen(CHATS_CACHE ".tmp", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (sf >= 0) { int w = sceIoWrite(sf, buf, len); sceIoClose(sf); if (w == (int)len) { sceIoRemove(CHATS_CACHE); sceIoRename(CHATS_CACHE ".tmp", CHATS_CACHE); } else sceIoRemove(CHATS_CACHE ".tmp"); } } } jv *c = json_parse(buf); free(buf); pthread_mutex_lock(&mu); json_free(pend_chats); pend_chats = c; pthread_mutex_unlock(&mu); }
         }
         if (tick % 20 == 0) {
           snprintf(url, sizeof url, "%s/profile", base);
@@ -796,6 +802,7 @@ static Media *media_get(const char *jid, const char *id) {
       m = &med[best]; tex_retire(m->tex); tex_retire(m->big); free(m->braw);
     }
     memset(m, 0, sizeof *m); snprintf(m->key, sizeof m->key, "%s", key); snprintf(m->jid, sizeof m->jid, "%s", jid); snprintf(m->id, sizeof m->id, "%s", id);
+    { char *b = NULL; size_t l = 0; if (dc_get("thcache", key, &b, &l, 0) == 0) { m->raw = (unsigned char *)b; m->rawlen = l; m->state = 1; } }   // anteprima gia' sul disco
   }
   m->last = frame_no;
   if (m->state == 1 && m->raw) {
@@ -1196,6 +1203,7 @@ static void send_draft(void) {
   draft[0] = 0; reply_id[0] = 0; edit_id[0] = 0; chat_stick = 1; emoji_open = 0;
 }
 static void open_chat(int idx) {
+  if (strcmp(wa_status, "open")) { toast_set(T("Connessione a WhatsApp...")); return; }   // con la lista salvata a schermo, le chat si aprono solo a collegamento avvenuto
   crumb("APRO CHAT idx=%d nome=%.30s gruppo=%d", idx, chats[idx].name, chats[idx].group);
   msg_limit = 30; older_pending = 0; no_more_older = 0; anchor_id[0] = 0; chat_logged_frames = 0;
   cur_chat = idx; screen = S_CHAT; chat_stick = 1; chat_scroll = 0; chat_vel = 0; draft[0] = 0; reply_id[0] = 0; edit_id[0] = 0; emoji_open = 0; menu_open = 0; viewer_open = 0;
@@ -1303,8 +1311,11 @@ int main(void) {
     if (toast_new) { toast_new = 0; snprintf(toast_show, sizeof toast_show, "%s", toast_txt); toast_frames = 180; }
     char pst[24]; snprintf(pst, sizeof pst, "%s", pres_state);
     pthread_mutex_unlock(&mu);
-    if (!strcmp(st, "open") && screen == S_LOGIN) screen = S_LIST;
-    if (strcmp(st, "open") && screen != S_LOGIN) screen = S_LOGIN;
+    int st_open = !strcmp(st, "open");
+    int pre = cache_chats_loaded && !st_open && strcmp(st, "qr") && strcmp(st, "loggedout") && nchats > 0;   // lista salvata: si mostra subito, anche se il motore sta ancora collegandosi
+    if (!strcmp(st, "qr") || !strcmp(st, "loggedout")) { static int rmc; if (!rmc) { rmc = 1; sceIoRemove(CHATS_CACHE); cache_chats_loaded = 0; } }   // altro account o sessione chiusa: la lista salvata non vale piu'
+    if ((st_open || pre) && screen == S_LOGIN) screen = S_LIST;
+    if (!st_open && !pre && screen != S_LOGIN) screen = S_LOGIN;
 
     // ---- input ----
     sceCtrlPeekBufferPositive(0, &pad, 1);
@@ -1698,6 +1709,11 @@ int main(void) {
     FC("schermata base disegnata");
     draw_extra_screens(); FC("popup/extra disegnati");
 
+    if (screen != S_LOGIN && strcmp(st, "open")) {   // collegamento in corso con la lista salvata a schermo
+      float bw = 360; float bx = (SW - bw) / 2, by = SH - 56; rrect(bx, by, bw, 38, 19, RGBA8(0x1F, 0x2C, 0x34, 235));
+      const char *lb = T("Connessione a WhatsApp..."); text((int)(bx + 20), (int)by + 9, C_GREEN2, 17, lb);
+      float sh = fmodf(frame_no * 5.0f, bw - 40); rrect(bx + 20 + sh * 0.0f, by + 31, 20 + sh, 3, 1.5f, C_GREEN2);
+    }
     if (toast_frames > 0) { toast_frames--; int w = tw(17, toast_show) + 40; rrect((SW - w) / 2, SH - 120, w, 40, 20, RGBA8(0x30, 0x3C, 0x44, 245)); text((SW - w) / 2 + 20, SH - 111, C_TEXT, 17, toast_show); }
     { unsigned fs = vita2d_pool_free_space(); unsigned used = pool_total > fs ? pool_total - fs : 0; if (used > pool_max_used) { if (used > pool_max_used + pool_max_used / 4 + 20000) crumb("gpu: memoria temporanea usata %u KB di %u KB", used / 1024, pool_total / 1024); pool_max_used = used; } }
     vita2d_end_drawing(); FC("end_drawing ok");

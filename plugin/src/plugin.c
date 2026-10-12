@@ -138,7 +138,7 @@ static int heap_ready(void) {
   if (heap_blk < 0) { plog("memoria del client leggero non disponibile: 0x%x", heap_blk, 0); heap_blk = -2; return 0; }
   void *base = NULL; sceKernelGetMemBlockBase(heap_blk, &base); heap_init(base, HEAP_BYTES); plog("memoria del client leggero pronta (%d KB)", HEAP_BYTES / 1024, 0); return 1;
 }
-static uint8_t cred[2048]; static int cred_len; static uint8_t npriv[32], npub[32]; static const uint8_t *login_pl; static size_t login_pl_len; static char my_user[32];
+static uint8_t cred[2048]; static int cred_len; static uint8_t npriv[32], npub[32]; static const uint8_t *login_pl; static size_t login_pl_len; static char my_user[64];
 static int load_creds(void) {
   SceUID f = sceIoOpen(LITEFILE, SCE_O_RDONLY, 0); if (f < 0) return 0;
   int n = sceIoRead(f, cred, sizeof cred); sceIoClose(f); if (n < 72 || memcmp(cred, "WAL2", 4)) return 0;
@@ -146,7 +146,7 @@ static int load_creds(void) {
   login_pl = cred + o; login_pl_len = pl; o += pl; int nip = cred[o++]; if (nip > 8 || o + nip * 4 + 33 > (size_t)n) return 0;
   uint32_t ipsv[8]; for (int i = 0; i < nip; i++) { memcpy(&ipsv[i], cred + o, 4); o += 4; }
   plat_set_ips(ipsv, nip); plat_set_seed(cred + o, 32); o += 32;
-  int ml = o < (size_t)n ? cred[o++] : 0; if (ml > 30) ml = 30; if (o + ml > (size_t)n) ml = 0; memcpy(my_user, cred + o, ml); my_user[ml] = 0; cred_len = n; return nip > 0;
+  int ml = o < (size_t)n ? cred[o++] : 0; if (ml > 62) ml = 62; if (o + ml > (size_t)n) ml = 0; memcpy(my_user, cred + o, ml); my_user[ml] = 0; cred_len = n; return nip > 0;
 }
 // file di testo piccolo -> buffer statico
 static char names[24 * 1024]; static int names_len, names_loaded;
@@ -180,7 +180,8 @@ static void on_node(const LiteNode *n, void *ud) {
   (void)ud; if (strcmp(n->tag, "message")) return;
   if (!strcmp(n->category, "peer") || !strcmp(n->type, "reaction")) return;
   char who[48]; const char *sender = n->participant[0] ? n->participant : n->from; bare_user(sender, who, sizeof who);
-  if (my_user[0] && !strcmp(who, my_user)) return;   // messaggi scritti da un altro mio dispositivo
+  { const char *q = my_user; while (*q) { const char *e = q; while (*e && *e != ',') e++; if ((size_t)(e - q) == strlen(who) && !strncmp(q, who, e - q)) return; q = *e ? e + 1 : e; } }   // messaggi scritti da un altro mio dispositivo (numero o lid)
+  { char fu[48]; bare_user(n->from, fu, sizeof fu); const char *q = my_user; while (*q && n->recipient[0]) { const char *e = q; while (*e && *e != ',') e++; if ((size_t)(e - q) == strlen(fu) && !strncmp(q, fu, e - q)) return; q = *e ? e + 1 : e; } }   // da me verso un altro (c'e' il destinatario)
   if (seen_before(n->id) || notif_off()) return;
   char nm[64] = "", gnm[64] = ""; int flag = 0, flag2 = 0; int isg = strstr(n->from, "@g.us") != NULL;
   if (!names_loaded) { load_text(NAMESFILE, names, sizeof names, &names_len); load_tpl(); names_loaded = 1; }

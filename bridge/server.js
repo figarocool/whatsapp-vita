@@ -277,7 +277,7 @@ function writeLiteFiles(force) {
       const cfg = { ...B.DEFAULT_CONNECTION_CONFIG, browser: [process.env.WA_DEVICE_NAME || 'PSVita', 'Chrome', '1.0.0'], syncFullHistory: false, countryCode: 'US' };
       const node = B.generateLoginNode(creds.me.id, cfg); const payload = Buffer.from(B.proto.ClientPayload.encode(node).finish());
       const ips = Buffer.from(globalThis.__nat.resolve4('web.whatsapp.com') || []);
-      const me = String(creds.me.id).split(/[:@]/)[0], meb = Buffer.from(me);
+      const me = [creds.me.id, creds.me.lid].filter(Boolean).map((x) => String(x).split(/[:@]/)[0]).join(','), meb = Buffer.from(me);   // numero e lid: i messaggi scritti da me, da un altro dispositivo, arrivano con uno dei due
       const head = Buffer.alloc(70); head.write('WAL2', 0); Buffer.from(creds.noiseKey.private).copy(head, 4); Buffer.from(creds.noiseKey.public).copy(head, 36); head.writeUInt16LE(payload.length, 68);
       const seed = Buffer.from(globalThis.__nat.randomBytes(32));
       if (ips.length) { fs.writeFileSync(LITE_DIR + 'wa_lite.bin', Buffer.concat([head, payload, Buffer.from([ips.length / 4]), ips, seed, Buffer.from([meb.length]), meb])); writeLiteFiles.done = true; log('plugin: credenziali del client leggero scritte (' + payload.length + ' byte, ' + ips.length / 4 + ' indirizzi)'); }

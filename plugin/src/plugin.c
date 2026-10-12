@@ -232,7 +232,7 @@ static int worker(SceSize args, void *argp) {
       }
     }
     if (client) {
-      if (try_armed && now - connected_at > 120) try_clear();   // due minuti di collegamento stabile: nessun crash
+      if (try_armed && now - connected_at > 40) try_clear();   // 40 secondi di collegamento stabile: nessun crash
       int rc = lite_poll(client, 1500, on_node, NULL);
       if (rc != 0) {
         plog("collegamento interrotto: %d", rc, 0); if (rc == LITE_CONFLICT) { next_try = now + 120; plog("sostituito da un altro dispositivo (l'app?): attendo", 0, 0); } else { next_try = now + 15; }

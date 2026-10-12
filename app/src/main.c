@@ -164,7 +164,7 @@ static struct { volatile int active, cancel; char title[80], phase[96]; volatile
 static void xfer_phase(const char *ph) { pthread_mutex_lock(&mu); snprintf(xfer.phase, sizeof xfer.phase, "%s", ph); pthread_mutex_unlock(&mu); }
 static int xfer_dl_cb(unsigned long long done, unsigned long long total) { xfer.done = done; xfer.total = total; return xfer.cancel; }
 // anteprima video in-app (storie e chat): il bridge converte, l'app scarica in cache e lo riproduce con SceAvPlayer
-static struct { char key[260]; char path[300]; volatile int gen, state, pct, phase, opened, audio, retries; volatile unsigned retry_at; } vp;
+static struct { char key[260]; char path[300]; volatile int gen, state, pct, phase, opened, audio, retries, original, software; volatile unsigned retry_at; } vp;
 static void aud_toggle(const char *jid, const char *id); static int aud_state(const char *jid, const char *id, int *pct, int *secs);   // audio in chat (in extra.inc)   // state: 0 niente, 1 preparo, 2 pronto, 3 errore; phase: 0 WhatsApp, 1 conversione, 2 download
 static __thread int vp_job_gen;
 static int vp_dl_cb(unsigned long long done, unsigned long long total) { vp.pct = total ? (int)(100 * done / total) : 0; return vp_job_gen != vp.gen; }   // annulla se nel frattempo si e' passati ad altro
@@ -388,7 +388,11 @@ static void run_job(Job *j, const char *base) {
     }
     case J_VPREP: {
       int gen = atoi(j->extra); vp_job_gen = gen; char e[500], e2b[200], key[64] = "", cf[300], part[310];
-      url_enc(j->jid, e, sizeof e); url_enc(j->id, e2b, sizeof e2b); vp_cachefile(j->id, !strcmp(j->kind, "audio"), cf, sizeof cf); snprintf(part, sizeof part, "%s.part", cf);
+      if (gen != vp.gen) break;
+      url_enc(j->jid, e, sizeof e); url_enc(j->id, e2b, sizeof e2b); vp_cachefile(j->id, !strcmp(j->kind, "audio"), cf, sizeof cf);
+      if (!strcmp(j->kind, "original")) { char normal[300]; snprintf(normal, sizeof normal, "%s", cf); snprintf(cf, sizeof cf, "%s.original.mp4", normal); }
+      snprintf(part, sizeof part, "%s.%d.part", cf, gen);
+      if (!strcmp(j->kind, "original")) { SceIoStat st; if (sceIoGetstat(cf, &st) >= 0 && st.st_size > 0 && gen == vp.gen) { snprintf(vp.path, sizeof vp.path, "%s", cf); vp.state = 2; break; } }
       snprintf(url, sizeof url, "%s/prep/%s/%s?kind=%s", base, e, e2b, !strcmp(j->kind, "audio") ? "audio" : "video");
       { char *r = NULL; size_t rl = 0; int rc = http_get_t(url, &r, &rl, 20); jv *v = (rc == 0 && r) ? json_parse(r) : NULL; free(r); if (v) { snprintf(key, sizeof key, "%s", json_str(v, "key", "")); json_free(v); } }
       if (!key[0]) { crumb("lettore: il bridge non ha risposto a /prep"); if (gen == vp.gen) vp.state = 3; break; }
@@ -398,15 +402,16 @@ static void run_job(Job *j, const char *base) {
         snprintf(url, sizeof url, "%s/prep-status/%s", base, key); char *r = NULL; size_t rl = 0;
         if (http_get_t(url, &r, &rl, 10) == 0 && r) { jv *v = json_parse(r); if (v) { const char *st = json_str(v, "state", "");
           if (!strcmp(st, "ready")) ready = 1; else if (!strcmp(st, "error")) { json_free(v); free(r); if (gen == vp.gen) vp.state = 3; goto vprep_done; }
-          else if (!strcmp(st, "convert")) { vp.phase = 1; vp.pct = (int)json_num(v, "pct", 0); } else { vp.phase = 0; vp.pct = 0; }
+          else if (gen == vp.gen) { if (!strcmp(st, "convert")) { vp.phase = 1; vp.pct = (int)json_num(v, "pct", 0); } else { vp.phase = 0; vp.pct = 0; } }
           json_free(v); } }
         free(r); if (!ready) usleep(400000);
       }
       if (!ready || gen != vp.gen) { if (gen == vp.gen) vp.state = 3; break; }
       vp.phase = 2; vp.pct = 0; sceIoMkdir("ux0:data/whatsapp", 0777); sceIoMkdir("ux0:data/whatsapp/cache", 0777);
-      snprintf(url, sizeof url, "%s/prep-file/%s", base, key);
+      snprintf(url, sizeof url, "%s/prep-file/%s%s", base, key, !strcmp(j->kind, "original") ? "?original=1" : "");
       int drc = http_download_file(url, part, 300, vp_dl_cb); if (drc != 0) { crumb("lettore: download fallito (%d) %s", drc, url); sceIoRemove(part); if (gen == vp.gen) vp.state = 3; break; }
-      sceIoRemove(cf); sceIoRename(part, cf);
+      if (gen != vp.gen) { sceIoRemove(part); break; }
+      sceIoRemove(cf); if (sceIoRename(part, cf) < 0) { sceIoRemove(part); if (gen == vp.gen) vp.state = 3; break; }
       if (gen == vp.gen) { snprintf(vp.path, sizeof vp.path, "%s", cf); vp.state = 2; }
       vprep_done: break;
     }
@@ -484,11 +489,12 @@ typedef struct { Job j; char base[256]; } LongJob;
 static volatile int long_jobs;
 static void *long_job_main(void *a) { LongJob *lj = a; run_job(&lj->j, lj->base); free(lj); __sync_fetch_and_sub(&long_jobs, 1); return NULL; }
 static void spawn_long_job(const Job *j, const char *base) {
-  if (__sync_fetch_and_add(&long_jobs, 1) >= 4) { __sync_fetch_and_sub(&long_jobs, 1); if (j->type == J_PREP) { xfer.active = 0; toast_set(T("Occupato, riprova")); } return; }
-  LongJob *lj = malloc(sizeof *lj); if (!lj) { __sync_fetch_and_sub(&long_jobs, 1); return; }
+  if (j->type == J_VPREP && atoi(j->extra) != vp.gen) return;
+  if (__sync_fetch_and_add(&long_jobs, 1) >= 4) { __sync_fetch_and_sub(&long_jobs, 1); if (j->type == J_PREP) { xfer.active = 0; toast_set(T("Occupato, riprova")); } else if (atoi(j->extra) == vp.gen) vp.state = 0; return; }
+  LongJob *lj = malloc(sizeof *lj); if (!lj) { __sync_fetch_and_sub(&long_jobs, 1); if (j->type == J_VPREP && atoi(j->extra) == vp.gen) vp.state = 0; return; }
   lj->j = *j; snprintf(lj->base, sizeof lj->base, "%s", base);
   pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 512 * 1024); pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
-  pthread_t th; if (pthread_create(&th, &at, long_job_main, lj) != 0) { free(lj); __sync_fetch_and_sub(&long_jobs, 1); }
+  pthread_t th; if (pthread_create(&th, &at, long_job_main, lj) != 0) { free(lj); __sync_fetch_and_sub(&long_jobs, 1); if (j->type == J_VPREP && atoi(j->extra) == vp.gen) vp.state = 0; }
   pthread_attr_destroy(&at);
 }
 // Foto profilo e anteprime: in un filo a parte, cosi' un'attesa lunga (es. una foto che il motore non trova) non blocca i messaggi.
@@ -498,7 +504,8 @@ static void media_pump(const char *base) {
     for (int n = 0, netn = 0; n < 60 && netn < 3 && !quit_flag; n++) {
       char mj[160] = "", mid[64] = ""; int mi = -1;
       pthread_mutex_lock(&mu);
-      for (int i = 0; i < nmed; i++) if (med[i].state == 0) { snprintf(mj, sizeof mj, "%s", med[i].jid); snprintf(mid, sizeof mid, "%s", med[i].id); med[i].state = 3; mi = i; break; }
+      for (int i = 0; i < nmed; i++) if (med[i].state == 0 && (mi < 0 || med[i].last > med[mi].last)) mi = i;
+      if (mi >= 0) { snprintf(mj, sizeof mj, "%s", med[mi].jid); snprintf(mid, sizeof mid, "%s", med[mi].id); med[mi].state = 3; }
       pthread_mutex_unlock(&mu);
       if (mi < 0) break;
       char e[400], e2[200]; url_enc(mj, e, sizeof e); url_enc(mid, e2, sizeof e2);
@@ -560,7 +567,7 @@ static void *media_worker(void *arg) {
   (void)arg;
   while (!quit_flag) {
     char base[256]; pthread_mutex_lock(&mu); snprintf(base, sizeof base, "%s", base_url); int is_open = !strcmp(wa_status, "open"); pthread_mutex_unlock(&mu);
-    int pend = 0; pthread_mutex_lock(&mu); for (int k = 0; k < nmed; k++) if (med[k].state == 0) pend = 1; for (int k = 0; k < nav; k++) if (avs[k].state == 0) pend = 1; pthread_mutex_unlock(&mu);
+    int pend = 0; pthread_mutex_lock(&mu); for (int k = 0; k < nmed; k++) if (med[k].state == 0 || med[k].bstate == 4) pend = 1; for (int k = 0; k < nav; k++) if (avs[k].state == 0) pend = 1; pthread_mutex_unlock(&mu);
     if (is_open && pend) media_pump(base);
     usleep(pend ? 50 * 1000 : 150 * 1000);
   }
@@ -1734,6 +1741,7 @@ int main(void) {
     if (toast_frames > 0) { toast_frames--; int w = tw(17, toast_show) + 40; rrect((SW - w) / 2, SH - 120, w, 40, 20, RGBA8(0x30, 0x3C, 0x44, 245)); text((SW - w) / 2 + 20, SH - 111, C_TEXT, 17, toast_show); }
     { unsigned fs = vita2d_pool_free_space(); unsigned used = pool_total > fs ? pool_total - fs : 0; if (used > pool_max_used) { if (used > pool_max_used + pool_max_used / 4 + 20000) crumb("gpu: memoria temporanea usata %u KB di %u KB", used / 1024, pool_total / 1024); pool_max_used = used; } }
     vita2d_end_drawing(); FC("end_drawing ok");
+    player_render_complete();
     {   // solo per i test: se esiste ux0:data/whatsapp/shot_at.txt (numero di frame), a quel frame salva lo schermo in shot.ppm
       static int shot_frame = -1; if (shot_frame < 0) { char b[16] = ""; SceUID sf = sceIoOpen("ux0:data/whatsapp/shot_at.txt", SCE_O_RDONLY, 0); if (sf >= 0) { int n = sceIoRead(sf, b, 15); sceIoClose(sf); b[n > 0 ? n : 0] = 0; } shot_frame = atoi(b); }
       if (shot_frame > 0 && (int)frame_no == shot_frame) {

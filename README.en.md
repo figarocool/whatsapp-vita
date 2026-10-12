@@ -81,6 +81,8 @@ You need VitaSDK, Node.js, CMake and the mbedTLS 3.6 sources (for the plugin: `-
 ```sh
 # engine (Baileys + bridge -> QuickJS bytecode)
 (cd bridge && npm install) && engine/build_engine.sh
+# software H.264 video decoder (build once)
+bash tools/build_video_decoder.sh
 # plugin
 cd plugin && cmake -S . -B build -DMBED_SRC=/path/to/mbedtls-3.6.x && cmake --build build
 # app (includes engine, plugin and installer in the VPK)

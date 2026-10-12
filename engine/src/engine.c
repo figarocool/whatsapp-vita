@@ -50,7 +50,7 @@ typedef struct {
   int closed_notified;
   // filo di lettura: continua a leggere dal socket (e decifrare) anche quando il JS e' impegnato per decine di secondi, altrimenti il server
   // vede un ricevente che non legge e chiude il collegamento durante le cronologie grandi
-  long long last_ping; pthread_t th; int th_on; volatile int th_stop; pthread_mutex_t mu; unsigned char *ib; size_t ilen, icap; volatile int ieof;
+  long long rx_bytes, last_rx, last_diag; pthread_t th; int th_on; volatile int th_stop; pthread_mutex_t mu; unsigned char *ib; size_t ilen, icap; volatile int ieof;
 } WS;
 
 struct Engine {
@@ -292,14 +292,18 @@ static void ws_free(WS *w) {
   free(w->rx); free(w->frag); if (G && G->ctx) JS_FreeValue(G->ctx, w->cb); memset(w, 0, sizeof *w);
 }
 static int ws_write_all(WS *w, const unsigned char *p, size_t n) {
-  size_t off = 0; long long t0 = now_ms();
+  size_t off = 0; long long t0 = now_ms(); int result = 0;
+  // Anche i retry TLS appartengono allo stesso invio: un ping o una lettura
+  // non devono sostituire il record pendente tra WANT_WRITE e il suo retry.
+  pthread_mutex_lock(&w->mu);
   while (off < n) {
-    if (w->th_on) pthread_mutex_lock(&w->mu); int r = mbedtls_ssl_write(&w->ssl, p + off, n - off); if (w->th_on) pthread_mutex_unlock(&w->mu);
+    int r = mbedtls_ssl_write(&w->ssl, p + off, n - off);
     if (r > 0) { off += r; continue; }
-    if (r == MBEDTLS_ERR_SSL_WANT_WRITE || r == MBEDTLS_ERR_SSL_WANT_READ) { if (now_ms() - t0 > 20000) return -1; fd_set fs; FD_ZERO(&fs); FD_SET(w->net.fd, &fs); struct timeval tv = { 0, 50000 }; select(w->net.fd + 1, r == MBEDTLS_ERR_SSL_WANT_READ ? &fs : NULL, r == MBEDTLS_ERR_SSL_WANT_WRITE ? &fs : NULL, NULL, &tv); continue; }
-    return -1;
+    if (r == MBEDTLS_ERR_SSL_WANT_WRITE || r == MBEDTLS_ERR_SSL_WANT_READ) { if (now_ms() - t0 > 20000) { elog("websocket: timeout scrittura TLS dopo %lu/%lu byte", (unsigned long)off, (unsigned long)n); result = -1; break; } fd_set fs; FD_ZERO(&fs); FD_SET(w->net.fd, &fs); struct timeval tv = { 0, 50000 }; select(w->net.fd + 1, r == MBEDTLS_ERR_SSL_WANT_READ ? &fs : NULL, r == MBEDTLS_ERR_SSL_WANT_WRITE ? &fs : NULL, NULL, &tv); continue; }
+    elog("websocket: errore scrittura TLS %d dopo %lu/%lu byte", r, (unsigned long)off, (unsigned long)n); result = -1; break;
   }
-  return 0;
+  pthread_mutex_unlock(&w->mu);
+  return result;
 }
 static int ws_send_frame_m(WS *w, int op, const unsigned char *d, size_t n, const unsigned char *fixed_mask) {
   unsigned char *f = malloc(n + 14); size_t h = 0; f[h++] = 0x80 | op;
@@ -325,14 +329,15 @@ static void *ws_reader(void *arg) {
       if (w->ilen + 16384 > w->icap) { size_t nc = w->icap ? w->icap * 2 : 131072; unsigned char *nb = realloc(w->ib, nc); if (!nb) break; w->ib = nb; w->icap = nc; }
       int r = mbedtls_ssl_read(&w->ssl, w->ib + w->ilen, w->icap - w->ilen);
       if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) break;
-      if (r <= 0) { err = 1; break; }
-      w->ilen += (size_t)r; got = 1;
+      if (r <= 0) { elog("websocket: lettura TLS terminata (%d)", r); err = 1; break; }
+      w->ilen += (size_t)r; w->rx_bytes += r; w->last_rx = now_ms(); got = 1;
     }
     if (err) w->ieof = 1;
     int more = mbedtls_ssl_get_bytes_avail(&w->ssl) > 0;
     pthread_mutex_unlock(&w->mu);
     if (err) break;
-    { static const unsigned char pm[4] = { 0x5A, 0xC3, 0x17, 0x9E }; long long nw = now_ms(); if (!w->last_ping) w->last_ping = nw; if (nw - w->last_ping >= 15000) { w->last_ping = nw; ws_send_frame_m(w, 9, (const unsigned char *)"v", 1, pm); } }   // ping WebSocket nativo: il collegamento resta vivo anche quando il JS e' impegnato
+    // La lettura resta attiva mentre il JS lavora. Il keepalive usa gli IQ
+    // WhatsApp del bridge, come Baileys, senza ping WebSocket aggiuntivi.
     if (!got && !more) { fd_set rs; FD_ZERO(&rs); FD_SET(w->net.fd, &rs); struct timeval tv = { 0, 50000 }; select(w->net.fd + 1, &rs, NULL, NULL, &tv); }
     else if (w->ilen >= (48u << 20)) usleep(20000);
   }
@@ -376,7 +381,7 @@ static JSValue js_ws_open(JSContext *ctx, JSValueConst this_val, int argc, JSVal
   while (rl < sizeof resp - 1 && now_ms() - t0 < 20000) { int r = mbedtls_ssl_read(&w->ssl, (unsigned char *)resp + rl, 1); if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) continue; if (r <= 0) break; rl++; if (rl >= 4 && !memcmp(resp + rl - 4, "\r\n\r\n", 4)) break; }
   resp[rl] = 0; if (strncmp(resp, "HTTP/1.1 101", 12) != 0) { char first[120]; snprintf(first, sizeof first, "%.100s", resp); char *nl = strchr(first, '\r'); if (nl) *nl = 0; ws_free(w); return JS_ThrowInternalError(ctx, "upgrade WebSocket rifiutato: %s", first); }
   elog("websocket: aperto dopo %lld ms", now_ms() - tws); mbedtls_net_set_nonblock(&w->net); mbedtls_ssl_set_bio(&w->ssl, &w->net, mbedtls_net_send, mbedtls_net_recv, NULL); w->state = 1; w->fd = w->net.fd;   // da qui letture non bloccanti
-  { pthread_attr_t pa; pthread_attr_init(&pa); pthread_attr_setstacksize(&pa, 256 * 1024); w->th_stop = 0; if (pthread_create(&w->th, &pa, ws_reader, w) == 0) w->th_on = 1; pthread_attr_destroy(&pa); }
+  { pthread_attr_t pa; pthread_attr_init(&pa); pthread_attr_setstacksize(&pa, 256 * 1024); w->th_stop = 0; int tr = pthread_create(&w->th, &pa, ws_reader, w); if (tr == 0) w->th_on = 1; else elog("websocket: thread lettura non avviato (%d), uso ciclo eventi", tr); pthread_attr_destroy(&pa); }
   return JS_NewInt32(ctx, id);
 }
 static JSValue js_ws_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -393,6 +398,8 @@ static void ws_service(WS *w) {
   int eof_after = 0;
   if (w->th_on) {   // i byte li ha gia' letti il filo di lettura
     pthread_mutex_lock(&w->mu);
+    long long nw = now_ms();
+    if (nw - w->last_diag >= 30000) { w->last_diag = nw; elog("websocket: ricevuti %lld byte TLS, coda %lu byte, ultima lettura %lld ms fa", w->rx_bytes, (unsigned long)w->ilen, w->last_rx ? nw - w->last_rx : -1LL); }
     if (w->ilen) { while (w->rxlen + w->ilen + 8192 > w->rxcap) { w->rxcap = w->rxcap ? w->rxcap * 2 : 65536; w->rx = realloc(w->rx, w->rxcap); } memcpy(w->rx + w->rxlen, w->ib, w->ilen); w->rxlen += w->ilen; w->ilen = 0; }
     eof_after = w->ieof; pthread_mutex_unlock(&w->mu);
   } else for (int guard = 0; guard < 64; guard++) {

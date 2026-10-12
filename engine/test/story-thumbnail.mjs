@@ -1,0 +1,18 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+const source=fs.readFileSync(new URL('../../bridge/server.js',import.meta.url),'utf8');
+const start=source.indexOf('async function mediaForRaw('), end=source.indexOf('\nasync function sendText',start);
+let downloads=0;
+const thumb=Buffer.from('thumbnail'), full=Buffer.from('full image');
+const message={key:{remoteJid:'status@broadcast'},message:{imageMessage:{jpegThumbnail:thumb}}};
+const context={mediaCache:new Map(),mediaFile:()=>'/unused',raws:new Map([['status@broadcast',new Map([['id',message]])],['chat@s.whatsapp.net',new Map([['id',message]])]]),describe:()=>({kind:'image'}),unwrap:m=>m.message,thumbBuf:b=>b,download:async()=>{downloads++;return full;},cacheSet(){},fs:{readFileSync(){throw Error('not cached');},writeFileSync(){}},sharp:b=>({rotate(){return this;},resize(){return this;},jpeg(){return this;},async toBuffer(){return b;}})};
+const get=vm.runInNewContext(source.slice(start,end)+'\nmediaForRaw',context);
+assert.deepEqual((await get('status@broadcast','id')).buf,thumb);
+assert.equal(downloads,0,'la miniatura di una storia non deve attendere il download');
+assert.deepEqual((await get('chat@s.whatsapp.net','id')).buf,full);
+assert.equal(downloads,1);
+message.message.imageMessage.jpegThumbnail=null;
+assert.deepEqual((await get('status@broadcast','id')).buf,full);
+assert.equal(downloads,2,'senza miniatura si deve scaricare la foto');
+console.log('OK: anteprima immediata nelle storie, download conservato senza miniatura e nelle chat');

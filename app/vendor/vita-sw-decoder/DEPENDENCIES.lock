@@ -1,0 +1,3 @@
+ffmpeg.version=8.1.2
+ffmpeg.source.sha256=464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c
+ffmpeg.license=LGPL-2.1-or-later

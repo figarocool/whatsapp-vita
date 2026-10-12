@@ -15,9 +15,19 @@ set(ENGINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../engine)
 set(ENGINE_SRCS ${ENGINE_DIR}/src/engine.c ${ENGINE_DIR}/src/curve25519.c ${ENGINE_DIR}/src/image.c ${ENGINE_DIR}/src/audio.c ${ENGINE_DIR}/quickjs/quickjs.c ${ENGINE_DIR}/quickjs/cutils.c ${ENGINE_DIR}/quickjs/dtoa.c ${ENGINE_DIR}/quickjs/libregexp.c ${ENGINE_DIR}/quickjs/libunicode.c)
 set_source_files_properties(${ENGINE_SRCS} PROPERTIES COMPILE_FLAGS "-w -DPATH_MAX=256 -DCONFIG_VERSION=\\\"engine\\\"")
 include_directories(${ENGINE_DIR}/src ${ENGINE_DIR}/quickjs)
-set(SRCS ${ENGINE_SRCS} src/main.c src/json.c src/net.c src/updater.c src/player.c src/i18n.c src/i18n_data.c src/sharedfb_stub.c)
+option(WA_SOFTWARE_VIDEO "FFmpeg software fallback for H.264 video" ON)
+if(WA_SOFTWARE_VIDEO)
+  add_subdirectory(vendor/vita-sw-decoder)
+endif()
+set(SRCS ${ENGINE_SRCS} src/main.c src/json.c src/net.c src/updater.c src/player.c src/software_player.c src/i18n.c src/i18n_data.c src/sharedfb_stub.c)
 add_executable(${PROJECT_NAME} ${SRCS})
 add_executable(whatsapp_safe ${SRCS})
+if(WA_SOFTWARE_VIDEO)
+  foreach(app_target whatsapp_vita whatsapp_safe)
+    target_compile_definitions(${app_target} PRIVATE WA_SOFTWARE_VIDEO=1)
+    target_link_libraries(${app_target} VitaSwDecoder::VitaSwDecoder z)
+  endforeach()
+endif()
 target_compile_definitions(whatsapp_safe PRIVATE SAFE_BUILD=1)
 target_link_libraries(${PROJECT_NAME}
   vita2d curl mbedtls mbedx509 mbedcrypto freetype png jpeg webpdemux webp opus ogg zstd bz2 z m pthread SceAppMgr_stub
@@ -34,6 +44,8 @@ target_link_libraries(whatsapp_safe
 
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/version.txt "${WA_VERSION}\n")
 set(COMMON_FILES
+  FILE vendor/vita-sw-decoder/LICENSE licenses/vita-sw-decoder-GPL-3.0.txt
+  FILE vendor/vita-sw-decoder/THIRD_PARTY_NOTICES.md licenses/vita-sw-decoder-notices.txt
   FILE sce_sys/icon0.png sce_sys/icon0.png
   FILE sce_sys/livearea/contents/template.xml sce_sys/livearea/contents/template.xml
   FILE sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
@@ -49,6 +61,11 @@ set(COMMON_FILES
   FILE assets/font-zhs.ttf assets/font-zhs.ttf
   FILE assets/font-zht.ttf assets/font-zht.ttf
   FILE ${CMAKE_CURRENT_BINARY_DIR}/version.txt assets/version.txt)
+if(WA_SOFTWARE_VIDEO)
+  list(APPEND COMMON_FILES FILE
+    ${VITA_SW_DECODER_FFMPEG_ROOT}/share/licenses/FFmpeg-LGPL-2.1.txt
+    licenses/FFmpeg-LGPL-2.1.txt)
+endif()
 
 # Installatore (WHAPUPD01): app separata che chiude WhatsApp, installa il pacchetto scaricato e la riapre.
 add_executable(wa_updater helper/updater_helper.c)

@@ -1,4 +1,5 @@
 #include "player.h"
+#include "software_player.h"
 #include <psp2/avplayer.h>
 #include <psp2/audioout.h>
 #include <psp2/io/fcntl.h>
@@ -40,7 +41,7 @@ static void tex_blk_free_all(void) {
 }
 static unsigned frames_seen;
 static unsigned a_frames; static int a_ch, a_rate, a_size, a_grain, a_open_rc = 1;
- static int seen_active; static unsigned long long open_at;
+ static int seen_active, start_attempts; static unsigned long long open_at, next_start;
 
 static void *audio_loop(void *arg) {
   (void)arg; SceAvPlayerFrameInfo fi;
@@ -114,11 +115,12 @@ int player_open(const char *path, int loop) {
   h = sceAvPlayerInit(&d); if (!h || ((unsigned)h >> 16) == 0x806A) { int er = (int)h; h = 0; return er ? er : -1; }   // l'handle e' un puntatore (anche con il bit alto acceso): errori solo 0 e 0x806Axxxx
   int ar = sceAvPlayerAddSource(h, path); if (ar < 0) { sceAvPlayerClose(h); h = 0; return ar; }
   sceAvPlayerSetLooping(h, loop ? 1 : 0);
-  alloc_ok = alloc_fail = 0; frames_seen = 0; seen_active = 0; open_at = sceKernelGetProcessTimeWide(); open_ok = 1; running = 1; audio_thr_on = pthread_create(&audio_thr, NULL, audio_loop, NULL) == 0;
+  alloc_ok = alloc_fail = 0; frames_seen = 0; seen_active = 0; start_attempts = 0; open_at = sceKernelGetProcessTimeWide(); next_start = open_at + 500000ULL; open_ok = 1; running = 1; audio_thr_on = pthread_create(&audio_thr, NULL, audio_loop, NULL) == 0;
   return 0;
 }
 
 void player_close(void) {
+  software_player_close();
   wav_close();
   if (!open_ok) return;
   running = 0; if (audio_thr_on) pthread_join(audio_thr, NULL); audio_thr_on = 0;
@@ -127,11 +129,20 @@ void player_close(void) {
   if (tex) { vita2d_wait_rendering_done(); vita2d_free_texture(tex); tex = NULL; } tex_w = tex_h = 0;
 }
 
-int player_active(void) { return open_ok || wav_mode; }
+int player_open_software(const char *path, int loop) { player_close(); return software_player_open(path, loop); }
+int player_draw_software(float x, float y, float w, float hh) { return software_player_draw(x, y, w, hh); }
+int player_software_failed(void) { return software_player_failed(); }
+void player_render_complete(void) { software_player_render_complete(); }
+int player_active(void) { return open_ok || wav_mode || software_player_active(); }
 
 static void *cur_data;
 vita2d_texture *player_frame(void) {
   if (wav_mode || !open_ok) return NULL;
+  if (sceAvPlayerIsActive(h)) seen_active = 1;
+  if (!seen_active && !frames_seen && start_attempts < 3 && sceKernelGetProcessTimeWide() >= next_start) {
+    int rc = sceAvPlayerStart(h); char msg[160]; start_attempts++; next_start = sceKernelGetProcessTimeWide() + 1000000ULL;
+    snprintf(msg, sizeof msg, "lettore: avvio esplicito %d -> 0x%x; eventi %s", start_attempts, (unsigned)rc, ev_log); player_log(msg);
+  }
   SceAvPlayerFrameInfo fi;
   if (sceAvPlayerGetVideoData(h, &fi) && fi.pData) {
     unsigned w = fi.details.video.width, hh = fi.details.video.height;
@@ -146,9 +157,10 @@ vita2d_texture *player_frame(void) {
   }
   return frames_seen ? tex : NULL;
 }
-unsigned player_frames(void) { return frames_seen; }
-unsigned long long player_time_ms(void) { if (wav_mode) return (unsigned long long)wav_pos * 1000ULL / ((unsigned long long)wav_rate * wav_ch * 2); return open_ok ? (unsigned long long)sceAvPlayerCurrentTime(h) : 0; }
+unsigned player_frames(void) { return software_player_active() ? software_player_frames() : frames_seen; }
+unsigned long long player_time_ms(void) { if (software_player_active()) return software_player_time_ms(); if (wav_mode) return (unsigned long long)wav_pos * 1000ULL / ((unsigned long long)wav_rate * wav_ch * 2); return open_ok ? (unsigned long long)sceAvPlayerCurrentTime(h) : 0; }
 int player_ended(void) {
+  if (software_player_active()) return software_player_ended();
   if (wav_mode) return wav_done;
   if (!open_ok) return 0;
   if (sceAvPlayerIsActive(h)) { seen_active = 1; return 0; }
@@ -157,7 +169,7 @@ int player_ended(void) {
 }
 void player_size(unsigned *w, unsigned *h2) { *w = tex_w; *h2 = tex_h; }
 void player_audio_diag(char *out, int n) { snprintf(out, n, "audio: frames=%u ch=%d rate=%d size=%d grain=%d porta=%d", a_frames, a_ch, a_rate, a_size, a_grain, a_open_rc); }
-void player_video_diag(char *out, int n) { snprintf(out, n, "memoria fotogrammi: ok=%u fallite=%u (ultima %u byte); heap lettore: %u blocchi, %u falliti, %llu KB; attivo=%d", alloc_ok, alloc_fail, alloc_last_fail, ga_n, ga_fail, ga_bytes / 1024, open_ok ? sceAvPlayerIsActive(h) : -1); }
+void player_video_diag(char *out, int n) { if (software_player_active()) { software_player_diag(out, n); return; } snprintf(out, n, "memoria fotogrammi: ok=%u fallite=%u (ultima %u byte); heap lettore: %u blocchi, %u falliti, %llu KB; attivo=%d", alloc_ok, alloc_fail, alloc_last_fail, ga_n, ga_fail, ga_bytes / 1024, open_ok ? sceAvPlayerIsActive(h) : -1); }
 void player_stream_diag(char *out, int n) {
   int w = 0; out[0] = 0; if (!open_ok) return;
   for (uint32_t i = 0; i < 4; i++) { SceAvPlayerStreamInfo si; memset(&si, 0, sizeof si); if (sceAvPlayerGetStreamInfo(h, i, &si) == 0 && w < n - 40) w += snprintf(out + w, n - w, "[flusso %u tipo %u dur %llu ms %ux%u] ", i, si.type, (unsigned long long)si.duration, si.details.video.width, si.details.video.height); }

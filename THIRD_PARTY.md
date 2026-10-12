@@ -13,6 +13,8 @@ The engine and the notification plugin bundle or link the following software. Ea
 | zlib | Compression | zlib license |
 | [VitaShell](https://github.com/TheOfficialFloW/VitaShell) (package preparation) | VPK installer helper | GPL-3.0 |
 | [FFmpeg-vita](https://github.com/fish47/FFmpeg-vita) | Reference for the hardware video decoder | LGPL/GPL (reference only, no code bundled) |
+| [vita-sw-decoder](https://github.com/spyro-98/vita-sw-decoder) | CPU H.264 fallback player | GPL-3.0-only; vendored source and license in `app/vendor/vita-sw-decoder/` |
+| [FFmpeg](https://ffmpeg.org/) 8.1.2 | Software H.264 decoding and MP4 demuxing | LGPL-2.1-or-later; license in VPK, corresponding source archive in release assets |
 | Roboto | Font | Apache-2.0 |
 | Noto Sans CJK, Noto Color Emoji | Fonts | SIL OFL 1.1 |
 

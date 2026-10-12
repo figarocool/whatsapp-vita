@@ -2,6 +2,10 @@
 #pragma once
 #include <vita2d.h>
 int player_open(const char *path, int loop);   // 0 ok
+int player_open_software(const char *path, int loop);
+int player_draw_software(float x, float y, float w, float h); // -1: system player
+int player_software_failed(void);
+void player_render_complete(void);
 unsigned long long player_time_ms(void);   // posizione di riproduzione
 int player_ended(void);   // 1 se la riproduzione (senza loop) e' finita
 void player_close(void);

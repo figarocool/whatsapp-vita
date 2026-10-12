@@ -484,7 +484,7 @@ function runFfmpeg(args, durSec, onPct, bg, holder) {
   });
 }
 function prepStart(jid, id, kind, bg) {
-  const key = sha1hex(jid + '|' + id + '|' + kind + '|r11'), old = preps.get(key);
+  const key = sha1hex(jid + '|' + id + '|' + kind + '|r12'), old = preps.get(key);
   // se l'utente chiede un file che sta convertendo in background a bassa priorita', si ferma e si rifa' a priorita' normale
   if (old && old.bg && !bg) {
     old.bg = false;   // da ora ha la priorita' dell'utente
@@ -496,8 +496,9 @@ function prepStart(jid, id, kind, bg) {
     const out = path.join(VIDEO_DIR, key + '.' + p.ext), src = path.join(VIDEO_DIR, key + '.src'), tmp = path.join(VIDEO_DIR, key + '.tmp.' + p.ext); const t0 = Date.now();
     try {
       if (fs.existsSync(out)) { p.file = out; p.size = fs.statSync(out).size; p.pct = 100; p.state = 'ready'; return; }
-      const m = raws.get(jid)?.get(id); if (!m) throw new Error('messaggio non trovato');
+      const m = rawList(jid).get(id); if (!m) throw new Error('messaggio non trovato');
       fs.writeFileSync(src, await download(m));
+      if (ENGINE && kind === 'video') fs.copyFileSync(src, out + '.original');
       if (kind === 'file') fs.renameSync(src, out);
       else {
         p.state = 'convert'; p.pct = 0; const dur = await probeDuration(src);
@@ -518,7 +519,8 @@ function prepStart(jid, id, kind, bg) {
 // Video in arrivo (storie e chat): si convertono in background, uno alla volta, cosi' sulla Vita sono gia' pronti.
 const bgQueue = []; let bgBusy = false;
 function bgPrep(jid, id) {
-  const key = sha1hex(jid + '|' + id + '|video|r11'); const x = preps.get(key);
+  if (jid === 'status@broadcast') return;
+  const key = sha1hex(jid + '|' + id + '|video|r12'); const x = preps.get(key);
   if ((x && x.state !== 'error') || bgQueue.some((t) => t[2] === key)) return;
   if (fs.existsSync(path.join(VIDEO_DIR, key + '.mp4'))) return;
   bgQueue.push([jid, id, key]); bgNext();
@@ -562,7 +564,7 @@ function pfPump() {
 }
 function prefetchChat(jid, n) {
   const list = [...(raws.get(jid)?.values() || [])].sort((a, b) => num(b.messageTimestamp) - num(a.messageTimestamp));
-  let c = 0; for (const m of list) { if (c >= n) break; const d = describe(m); if (d && (d.kind === 'image' || d.kind === 'sticker')) { prefetchMedia(jid, m.key.id); c++; } }
+  let c = 0; for (const m of list) { if (c >= n) break; const d = describe(m); if (d && (d.kind === 'image' || d.kind === 'sticker' || d.kind === 'video')) { prefetchMedia(jid, m.key.id); c++; } }
 }
 // la miniatura puo' essere un Buffer, un Uint8Array, {type:'Buffer',data} oppure una stringa base64 (come nei messaggi arrivati in diretta)
 function thumbBuf(th) {
@@ -578,12 +580,24 @@ async function mediaForRaw(jid, id) {
   const m = raws.get(jid)?.get(id); if (!m) return null;
   const d = describe(m); let out = null;
   if ((d.kind === 'image' || d.kind === 'video') && m.key.remoteJid.endsWith('@newsletter')) { const th = thumbBuf(unwrap(m).imageMessage?.jpegThumbnail || unwrap(m).videoMessage?.jpegThumbnail); if (th) out = { type: 'image/jpeg', buf: await sharp(th).resize(320, null).jpeg({ quality: 80 }).toBuffer() }; }
-  else if (d.kind === 'image') out = { type: 'image/jpeg', buf: await sharp(await download(m)).rotate().resize(480, 480, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 72 }).toBuffer() };
+  else if (d.kind === 'image') {
+    const th = jid === 'status@broadcast' ? thumbBuf(unwrap(m).imageMessage?.jpegThumbnail) : null;
+    out = { type: 'image/jpeg', buf: await sharp(th || await download(m)).rotate().resize(480, 480, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 72 }).toBuffer() };
+  }
   else if (d.kind === 'sticker') out = { type: 'image/png', buf: await sharp(await download(m), { animated: false }).resize(192, 192, { fit: 'inside', withoutEnlargement: true }).png().toBuffer() };
   else if (d.kind === 'video') {
-    const th = thumbBuf(unwrap(m).videoMessage?.jpegThumbnail);
-    if (th) { try { out = { type: 'image/jpeg', buf: await sharp(th).resize(320, null).jpeg({ quality: 80 }).toBuffer() }; } catch (e) { log('miniatura video non leggibile:', e.message); } }
-    else log('video senza miniatura nel messaggio:', id);
+    const video = unwrap(m).videoMessage;
+    const th = thumbBuf(video?.jpegThumbnail);
+    if (th?.length) { try { out = { type: 'image/jpeg', buf: await sharp(th).resize(320, null).jpeg({ quality: 80 }).toBuffer() }; } catch (e) { log('miniatura video non leggibile:', e.message); } }
+    if (!out && video?.thumbnailDirectPath && video.mediaKey) {
+      try {
+        const stream = await B.downloadContentFromMessage({ directPath: video.thumbnailDirectPath, mediaKey: video.mediaKey }, 'thumbnail-video', { options: { timeout: 10000 } });
+        const chunks = []; let size = 0;
+        for await (const chunk of stream) { size += chunk.length; if (size > 2 * 1024 * 1024) { stream.destroy(); throw new Error('miniatura troppo grande'); } chunks.push(chunk); }
+        out = { type: 'image/jpeg', buf: await sharp(Buffer.concat(chunks)).resize(320, null).jpeg({ quality: 80 }).toBuffer() };
+      } catch (e) { log('download miniatura video fallito:', e.message); }
+    }
+    if (!out) log('video senza anteprima utilizzabile:', id);
     if (!out) return { type: 'image/jpeg', buf: Buffer.from(VIDEO_PLACEHOLDER, 'base64') };   // senza miniatura: riquadro scuro con il simbolo di play (non si salva: se la miniatura arriva dopo, si usa quella)
   }
   if (out) { cacheSet(k, out); try { fs.writeFileSync(mediaFile(k) + (out.type === 'image/png' ? '.png' : '.jpg'), out.buf); } catch (_) {} }
@@ -718,7 +732,9 @@ http.createServer(async (req, res) => {
     if (p.startsWith('/prep-status/')) { const x = preps.get(arg('/prep-status/')); if (!x) return json(res, 404, { error: 'sconosciuto' }); return json(res, 200, { state: x.state, pct: x.pct, size: x.size, err: x.err }); }
     if (p.startsWith('/prep-file/')) {
       const x = preps.get(arg('/prep-file/')); if (!x || x.state !== 'ready' || !fs.existsSync(x.file)) return json(res, 404, { error: 'non pronto' });
-      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': fs.statSync(x.file).size }); return fs.createReadStream(x.file).pipe(res);
+      const file = q.get('original') === '1' ? x.file + '.original' : x.file;
+      if (!fs.existsSync(file)) return json(res, 404, { error: 'originale non disponibile' });
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': fs.statSync(file).size }); return fs.createReadStream(file).pipe(res);
     }
     if (p.startsWith('/vita-video/')) {
       const [jid, id] = arg('/vita-video/').split('/');
@@ -851,7 +867,7 @@ http.createServer(async (req, res) => {
         if (m.key.fromMe) continue;
         const v = view(m); if (v.ts < cutoff) continue;
         const sender = m.key.participant || m.participant || '?'; if (!by.has(sender)) by.set(sender, []);
-        if (v.kind === 'video') bgPrep('status@broadcast', v.id);
+        // I video delle storie si preparano solo quando vengono aperti.
         by.get(sender).push({ id: v.id, kind: v.kind, text: v.text, ts: v.ts, w: v.w, h: v.h });
       }
       const out = [...by.entries()].map(([jid, items]) => ({ jid, name: nameOf(jid), items: items.sort((a, b) => a.ts - b.ts) })).sort((a, b) => b.items[b.items.length - 1].ts - a.items[a.items.length - 1].ts);

@@ -4,6 +4,7 @@ import { createRequire } from 'module';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { patchDeviceDiscovery } from './patches/messages-send.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const NM = path.join(here, 'node_modules') + '/', BR = path.join(here, '../../bridge/node_modules') + '/';
@@ -35,6 +36,24 @@ const plugin = { name: 'vita-node', setup(b) {
   b.onResolve({ filter: /^qrcode$/ }, () => ({ path: S('qrcode.js') }));
   b.onResolve({ filter: /^curve25519-js$/ }, () => ({ path: curveShim }));
   b.onResolve({ filter: /^sharp$/ }, () => ({ path: S('sharp.js') }));
+  // Distingue la preparazione del messaggio dall'attesa del relay su WhatsApp.
+  b.onLoad({ filter: /Socket[\\/]messages-send\.js$/ }, (a) => ({
+    contents: patchDeviceDiscovery(fs.readFileSync(a.path, 'utf8'))
+      .replace('const fullMsg = await generateWAMessage(jid, content, {', "logger.debug('invio: preparazione messaggio');\n                const fullMsg = await generateWAMessage(jid, content, {")
+      .replace('await relayMessage(jid, fullMsg.message, {', "logger.debug('invio: messaggio preparato, avvio relay');\n                await relayMessage(jid, fullMsg.message, {")
+      .replace('const patchedForReporting = await patchMessageBeforeSending(message, [jid]);', "logger.debug('invio: preparazione reporting');\n                    const patchedForReporting = await patchMessageBeforeSending(message, [jid]);\n                    logger.debug('invio: reporting pronto');")
+      .replace('mgetDevices = await userDevicesCache.mget(usersToFetch);', "logger.debug('invio: lettura cache dispositivi');\n            mgetDevices = await userDevicesCache.mget(usersToFetch);\n            logger.debug('invio: cache dispositivi letta');")
+      .replace('const result = await sock.executeUSyncQuery(query);', "logger.debug('invio: richiesta USync dispositivi');\n        const result = await sock.executeUSyncQuery(query);\n        logger.debug('invio: risposta USync dispositivi');"),
+    loader: 'js', resolveDir: path.dirname(a.path)
+  }));
+  b.onLoad({ filter: /Socket[\\/]socket\.js$/ }, (a) => ({
+    contents: fs.readFileSync(a.path, 'utf8')
+      .replace('const msgId = node.attrs.id;', "const msgId = node.attrs.id;\n        logger.debug('query: inizio ' + node.tag + ' ' + (node.attrs.xmlns || '') + ' id=' + msgId);")
+      .replace('sendNode(node)\n', "sendNode(node)\n                .then(() => logger.debug('query: trasmessa id=' + msgId))\n")
+      .replace("if (result && 'tag' in result) {", "logger.debug('query: risposta id=' + msgId + ' tag=' + (result?.tag || 'nessuna'));\n        if (result && 'tag' in result) {")
+      .replace('logger?.warn?.({ msgId },', "logger?.warn?.({ msgId }, 'query: timeout id=' + msgId);\n                logger?.warn?.({ msgId },"),
+    loader: 'js', resolveDir: path.dirname(a.path)
+  }));
   b.onResolve({ filter: /^@whiskeysockets\/baileys$/ }, () => ({ path: BR + '@whiskeysockets/baileys/lib/index.js' }));
 } };
 const out = path.join(here, process.argv[2] || 'engine.bundle.js');

@@ -226,6 +226,7 @@ function saveStore(all = false) {
     if (dirtyMeta && (all || !ENGINE || Date.now() - lastMetaSave > 60000)) { dirtyMeta = false; lastMetaSave = Date.now(); writeAtomic(META, JSON.stringify({ chats: [...chats.values()], names: [...names.entries()], pnames: [...pnames.entries()], alias: [...alias.entries()], viewers: [...statusViewers.entries()].map(([k, v]) => [k, [...v.entries()]]) })); }
     for (const jid of [...dirtyChats]) {
       if (!all && n >= 15) break;               // al massimo 15 chat per giro: niente picchi di memoria/CPU
+      if (!all && ENGINE && n >= 1 && Date.now() - t0 > 1500) break;   // dentro la Vita: dopo 1,5 s si lascia respirare il motore (ping, richieste), il resto al prossimo giro
       dirtyChats.delete(jid); const list = raws.get(jid);
       if (!list || list.size === 0) { try { fs.unlinkSync(chatFile(jid)); } catch (_) {} continue; }
       const rs = [...reacts.entries()].filter(([k]) => k.startsWith(jid + '|')).map(([k, v]) => [k, [...v.entries()]]);
@@ -311,7 +312,7 @@ async function start() {
   const { state: auth, saveCreds } = await useMultiFileAuthState(AUTH);
   let version;
   try { ({ version } = await fetchLatestBaileysVersion()); } catch (_) {}
-  sock = makeWASocket({ auth, version, logger, browser: [process.env.WA_DEVICE_NAME || ('PSVita ' + require('os').hostname()), 'Chrome', '1.0.0'], syncFullHistory: false });
+  sock = makeWASocket({ auth, version, logger, browser: [process.env.WA_DEVICE_NAME || ('PSVita ' + require('os').hostname()), 'Chrome', '1.0.0'], syncFullHistory: false, keepAliveIntervalMs: ENGINE ? 60000 : 30000 });
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', async ({ connection, qr, lastDisconnect, isNewLogin }) => {
     if (isNewLogin) { log('nuovo login: parte la prima sincronizzazione'); sync.active = true; sync.progress = 0; sync.t = Date.now(); }
@@ -334,7 +335,9 @@ async function start() {
     for (const c of contacts || []) learnContact(c);
     dirtyMeta = true;
     for (const c of cs || []) chats.set(c.id, { jid: c.id, name: c.name || nameFor(c.id) || c.id.split('@')[0], unread: c.unreadCount || 0, ts: num(c.conversationTimestamp), pinned: c.pinned ? num(c.pinned) : 0 });
-    for (const m of ms || []) addMessage(m, false);
+    if (ENGINE && (ms || []).length > 150) {   // tanti messaggi: a blocchi, cedendo il passo fra uno e l'altro, cosi' il motore risponde ai ping e WhatsApp non chiude il collegamento
+      (async () => { const all = ms; for (let i = 0; i < all.length; i += 100) { for (const m of all.slice(i, i + 100)) addMessage(m, false); await new Promise((r) => setTimeout(r, 20)); } log('cronologia: ' + all.length + ' messaggi elaborati'); })().catch((e) => log('cronologia: errore', e.message));
+    } else for (const m of ms || []) addMessage(m, false);
   });
   sock.ev.on('contacts.upsert', (cs) => { for (const c of cs) learnContact(c); });
   sock.ev.on('contacts.update', (cs) => { for (const c of cs) learnContact(c); });

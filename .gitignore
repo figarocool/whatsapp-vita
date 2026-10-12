@@ -21,3 +21,7 @@ engine/build/
 engine/js/node_modules/
 engine/js/engine.bundle.js
 engine/js/engine.min.js
+
+plugin/build2/
+engine/build/
+app/build-motore/

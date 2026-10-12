@@ -1070,6 +1070,24 @@ static float screen_scale(int scr) {
   switch (scr) { case S_LOGIN: case S_PROFILE: case S_PICKER: case S_PREVIEW: if (k > 1.0f) k = 1.0f; break; default: break; }
   return k;
 }
+// Schermata di avvio: barra di avanzamento con le fasi (motore -> connessione -> chat). La percentuale e' una stima che si ferma prima del 100%:
+// arriva al 100% solo quando il motore e' davvero pronto e si passa alla lista.
+static void draw_splash(int stage, int busy_s) {
+  static unsigned t_stage0; static int last_stage = -1; static float disp;
+  if (stage != last_stage) { last_stage = stage; t_stage0 = frame_no; }
+  float t = (frame_no - t_stage0) / 60.0f, base[3] = { 0, 40, 80 }, span[3] = { 38, 38, 17 }, tau[3] = { 4.0f, 6.0f, 8.0f };
+  float target = base[stage] + span[stage] * (1.0f - expf(-t / tau[stage])); if (target > disp) disp += (target - disp) * 0.06f;
+  const char *lab[3] = { T("Avvio del motore WhatsApp..."), T("Connessione a WhatsApp..."), T("Caricamento delle chat...") };
+  float cx = SW / 2.0f;
+  { const char *ti = "WhatsApp"; int w = tw(44, ti); textb((int)(cx - w / 2.0f), 150, C_TEXT, 44, ti); }
+  { int w = tw(20, lab[stage]); text((int)(cx - w / 2.0f), 250, C_GREEN2, 20, lab[stage]); }
+  float bw = 520, bx = cx - bw / 2, by = 300;
+  rrect(bx, by, bw, 18, 9, C_BAR);
+  float fw = bw * disp / 100.0f; if (fw < 18) fw = 18; rrect(bx, by, fw, 18, 9, C_GREEN2);
+  { float sh = fmodf(frame_no * 6.0f, bw + 120) - 120; float x0 = bx + (sh < 0 ? 0 : sh), x1 = bx + (sh + 120 > fw ? fw : sh + 120); if (x1 - x0 > 8) rrect(x0, by + 3, x1 - x0, 12, 6, RGBA8(255, 255, 255, 70)); }   // riflesso che scorre: si vede che non e' bloccato
+  { char p[16]; snprintf(p, sizeof p, "%d%%", (int)disp); int w = tw(18, p); text((int)(cx - w / 2.0f), 336, C_SUB, 18, p); }
+  if (busy_s > 2) { char b[100]; snprintf(b, sizeof b, T("Il motore sta elaborando i dati... (%d s)"), busy_s); int w = tw(15, b); text((int)(cx - w / 2.0f), 380, C_SUB, 15, b); }
+}
 static int screen = S_LOGIN;
 static float list_scroll, list_vel, chat_scroll, chat_vel, emo_scroll, emo_vel, pick_scroll, pick_vel;
 static int chat_stick = 1, filter_sel, cur_chat = -1;
@@ -1332,7 +1350,9 @@ int main(void) {
     tex_reap();
     vita2d_start_drawing(); vita2d_clear_screen(); FC("start_drawing ok");
 
-    if (screen == S_LOGIN) {
+    if (screen == S_LOGIN && !strncmp(base_url, "engine:", 7) && !(nok && !strcmp(st, "qr")) && !(nok && !strcmp(st, "loggedout"))) {
+      draw_splash(!nok ? 0 : (!strcmp(st, "open") ? 2 : 1), eng_busy_s);
+    } else if (screen == S_LOGIN) {
       textb(60, 70, C_TEXT, 34, T("Usa WhatsApp su PS Vita"));
       const char *steps[] = { T("1. Apri WhatsApp sul telefono"), T("2. Tocca Menu o Impostazioni > Dispositivi collegati"), T("3. Tocca Collega un dispositivo"), T("4. Inquadra il codice QR a destra") };
       for (int i = 0; i < 4; i++) text(60, 140 + i * 40, C_SUB, 21, steps[i]);

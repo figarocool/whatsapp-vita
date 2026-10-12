@@ -204,7 +204,11 @@ static int try_count(void) { char b[4] = ""; SceUID f = sceIoOpen(TRYFILE, SCE_O
 static int try_armed;
 static void try_arm(void) { if (try_armed) return; try_armed = 1; int n = try_count() + 1; char b[2] = { (char)('0' + (n > 9 ? 9 : n)), 0 }; SceUID f = sceIoOpen(TRYFILE, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (f >= 0) { sceIoWrite(f, b, 1); sceIoClose(f); } }
 static void try_clear(void) { if (!try_armed) return; try_armed = 0; sceIoRemove(TRYFILE); }
-static LiteClient *client; static unsigned connected_at; static unsigned backoff_s = 20, next_try; static int net_inited;
+static LiteClient *client; static unsigned connected_at;
+// Se WhatsApp rifiuta le credenziali (dispositivo rimosso dal telefono) non si riprova all'infinito: si aspetta che l'app ne scriva di nuove (cambia la data del file).
+static SceDateTime bad_mtime; static int bad_set;
+static int creds_are_bad(void) { SceIoStat st; if (!bad_set || sceIoGetstat(LITEFILE, &st) < 0) return 0; return memcmp(&bad_mtime, &st.st_mtime, sizeof bad_mtime) == 0; }
+static void mark_creds_bad(void) { SceIoStat st; if (sceIoGetstat(LITEFILE, &st) >= 0) { bad_mtime = st.st_mtime; bad_set = 1; } } static unsigned backoff_s = 20, next_try; static int net_inited;
 static void drop_client(void) { if (client) { lite_close(client); client = NULL; } try_clear(); }
 static int worker(SceSize args, void *argp) {
   (void)args; (void)argp;
@@ -220,14 +224,15 @@ static int worker(SceSize args, void *argp) {
     unsigned now = sceKernelGetProcessTimeLow() / 1000000;
     if (was_active) { was_active = 0; next_try = now + 8; names_loaded = 0; }   // l'app si e' appena chiusa: le si lascia il tempo di salvare, poi si collega il plugin
     if (!client && now >= next_try) {
-      if (!load_creds() || !heap_ready()) { next_try = now + 30; }
+      if (creds_are_bad()) { next_try = now + 60; }
+      else if (!load_creds() || !heap_ready()) { next_try = now + 30; }
       else {
         if (!net_inited) { if (lv_net_resolve()) { int r = lv_net_init(); plog("rete pronta (0x%x)", r, 0); net_inited = 1; } else { next_try = now + 15; } }
         if (net_inited) {
           try_arm(); client = lite_new(npriv, npub, login_pl, login_pl_len, NULL);
           int rc = client ? lite_connect(client) : -99;
           if (rc == 0) { plog("client leggero collegato (memoria libera %d KB)", (int)(heap_free_bytes() / 1024), 0); backoff_s = 20; connected_at = now; }
-          else { plog("collegamento non riuscito: %d", rc, 0); if (client) { plog_s(lite_last_error(client)); } drop_client(); try_clear(); next_try = now + backoff_s; if (backoff_s < 300) backoff_s *= 2; }
+          else { plog("collegamento non riuscito: %d", rc, 0); if (client) { plog_s(lite_last_error(client)); } if (rc == LITE_ERR_LOGIN) { mark_creds_bad(); plog("credenziali rifiutate da WhatsApp: attendo che l'app ne scriva di nuove", 0, 0); } drop_client(); try_clear(); next_try = now + backoff_s; if (backoff_s < 300) backoff_s *= 2; }
         }
       }
     }
@@ -235,7 +240,7 @@ static int worker(SceSize args, void *argp) {
       if (try_armed && now - connected_at > 40) try_clear();   // 40 secondi di collegamento stabile: nessun crash
       int rc = lite_poll(client, 1500, on_node, NULL);
       if (rc != 0) {
-        plog("collegamento interrotto: %d", rc, 0); if (rc == LITE_CONFLICT) { next_try = now + 120; plog("sostituito da un altro dispositivo (l'app?): attendo", 0, 0); } else { next_try = now + 15; }
+        plog("collegamento interrotto: %d", rc, 0); if (rc == LITE_ERR_LOGIN) { mark_creds_bad(); plog("credenziali rifiutate da WhatsApp: attendo che l'app ne scriva di nuove", 0, 0); } if (rc == LITE_CONFLICT) { next_try = now + 120; plog("sostituito da un altro dispositivo (l'app?): attendo", 0, 0); } else { next_try = now + 15; }
         drop_client();
       }
     } else sceKernelDelayThread(2 * 1000 * 1000);

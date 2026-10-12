@@ -1,6 +1,8 @@
 // WhatsApp per PS Vita - front-end del bridge (vedi ../bridge). Tema scuro stile WhatsApp.
 #include <vita2d.h>
 #include <psp2/ctrl.h>
+#include <psp2/apputil.h>
+#include "message_links.h"
 #include <psp2/touch.h>
 #include <psp2/ime_dialog.h>
 #include <psp2/common_dialog.h>
@@ -1056,7 +1058,7 @@ static void layout_msg(Msg *m, int maxbw, int showname) {
 // ======================================================================
 // pulsanti dichiarati durante il disegno e risolti a fine frame
 // ======================================================================
-enum { B_NONE, B_ROW, B_CHIP, B_PROFILE, B_BACK, B_MSG, B_EMOJI_BTN, B_SEND, B_ATTACH, B_DRAFT, B_EMO_CELL, B_EMO_BACK, B_EMO_CLOSE, B_MENU_REACT, B_MENU_ITEM, B_MENU_CLOSE, B_VIEW_CLOSE, B_PICK_ENTRY, B_PICK_UP, B_PREVIEW_SEND, B_PREVIEW_CAPTION, B_PREVIEW_CANCEL, B_PROF_NAME, B_PROF_ABOUT, B_PROF_PHOTO, B_CANCEL_REPLY, B_TAB, B_FAB, B_SEARCH_ICON, B_LISTMENU, B_CHATMENU, B_HEADER_INFO, B_POPUP_ITEM, B_POPUP_CLOSE, B_UNBLOCK_BAR, B_SEARCH_BOX, B_SEARCH_ROW, B_NC_GROUP, B_NC_CONTACT, B_NC_ROW, B_GR_SUBJECT, B_GR_ROW, B_GR_CREATE, B_CT_BLOCK, B_MEDIA_TAB, B_MEDIA_ITEM, B_DOC_ITEM, B_UPD_ROW, B_COMM_ROW, B_ST_PREV, B_ST_NEXT, B_LOGOUT, B_PLUGIN, B_PLUGIN_RM, B_BRIDGE_ADDR, B_THEME_UI, B_UPD_MY, B_STORY_NEW, B_FOLLOW_CH, B_ST_VIEWERS, B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT, B_NOTIF_TEST, B_PLUGIN_DIAG , B_CAM_OPEN, B_CAM_SHOT, B_CAM_FLIP, B_COMM_NEW, B_COMM_HEAD, B_UPD_CHECK, B_UPD_CANCEL, B_UPD_BLOCK, B_LANG, B_LANG_ROW, B_XFER_CANCEL, B_ST_SAVE, B_CALL_ROW, B_ABOUT, B_SEL_CANCEL, B_SEL_PIN, B_SEL_MUTE, B_SEL_ARCH, B_SEL_DEL};
+enum { B_NONE, B_ROW, B_CHIP, B_PROFILE, B_BACK, B_MSG, B_EMOJI_BTN, B_SEND, B_ATTACH, B_DRAFT, B_EMO_CELL, B_EMO_BACK, B_EMO_CLOSE, B_MENU_REACT, B_MENU_ITEM, B_MENU_CLOSE, B_VIEW_CLOSE, B_PICK_ENTRY, B_PICK_UP, B_PREVIEW_SEND, B_PREVIEW_CAPTION, B_PREVIEW_CANCEL, B_PROF_NAME, B_PROF_ABOUT, B_PROF_PHOTO, B_CANCEL_REPLY, B_TAB, B_FAB, B_SEARCH_ICON, B_LISTMENU, B_CHATMENU, B_HEADER_INFO, B_POPUP_ITEM, B_POPUP_CLOSE, B_UNBLOCK_BAR, B_SEARCH_BOX, B_SEARCH_ROW, B_NC_GROUP, B_NC_CONTACT, B_NC_ROW, B_GR_SUBJECT, B_GR_ROW, B_GR_CREATE, B_CT_BLOCK, B_MEDIA_TAB, B_MEDIA_ITEM, B_DOC_ITEM, B_UPD_ROW, B_COMM_ROW, B_ST_PREV, B_ST_NEXT, B_LOGOUT, B_PLUGIN, B_PLUGIN_RM, B_BRIDGE_ADDR, B_THEME_UI, B_UPD_MY, B_STORY_NEW, B_FOLLOW_CH, B_ST_VIEWERS, B_VIEW_SAVE, B_VIEW_REPLY, B_VIEW_REACT, B_NOTIF_TEST, B_PLUGIN_DIAG , B_CAM_OPEN, B_CAM_SHOT, B_CAM_FLIP, B_COMM_NEW, B_COMM_HEAD, B_UPD_CHECK, B_UPD_CANCEL, B_UPD_BLOCK, B_LANG, B_LANG_ROW, B_XFER_CANCEL, B_ST_SAVE, B_CALL_ROW, B_ABOUT, B_SEL_CANCEL, B_SEL_PIN, B_SEL_MUTE, B_SEL_ARCH, B_SEL_DEL, B_LINK};
 typedef struct { int x, y, w, h, id, arg; } Btn;
 static Btn btns[400]; static int nb; static int clip_y0 = 0, clip_y1 = 100000;
 static void btn(int x, int y, int w, int h, int id, int arg) {
@@ -1068,6 +1070,47 @@ static void btn_reset(void) { nb = 0; clip_y0 = 0; clip_y1 = SH; }
 static Btn *btn_at(float x, float y) {
   for (int i = nb - 1; i >= 0; i--) if (x >= btns[i].x && x < btns[i].x + btns[i].w && y >= btns[i].y && y < btns[i].y + btns[i].h) return &btns[i];
   return NULL;
+}
+
+// Link hit areas are registered after the message bubble, so tapping opens
+// the browser while a long press still opens the message actions.
+static void draw_message_text(const Msg *m, int index, int x, int y) {
+  MessageLink links[MESSAGE_LINKS_MAX];
+  int n = m->kind == K_DELETED ? 0 : message_links(m->text, links);
+  size_t cursor = 0;
+  for (int k = 0; k < m->nlines; k++) {
+    const char *line = m->lines[k];
+    text(x, y + k * LH, m->kind == K_DELETED ? C_SUB : C_TEXT, BFONT, line);
+    if (!n) continue;
+    int run = -1; size_t start = 0, len = strlen(line);
+    for (size_t j = 0; j <= len; j++) {
+      int link = j < len ? message_link_byte(m->text, &cursor, (unsigned char)line[j], links, n) : -1;
+      if (link == run) continue;
+      if (run >= 0) {
+        char prefix[2600], part[2600];
+        snprintf(prefix, sizeof prefix, "%.*s", (int)start, line);
+        snprintf(part, sizeof part, "%.*s", (int)(j - start), line + start);
+        int left = x + tw(BFONT, prefix), width = tw(BFONT, part), top = y + k * LH;
+        text(left, top, C_BLUE, BFONT, part);
+        vita2d_draw_rectangle(left, top + BFONT + 2, width, 1, C_BLUE);
+        btn(left, top, width, LH, B_LINK, index * MESSAGE_LINKS_MAX + run);
+      }
+      start = j; run = link;
+    }
+  }
+}
+static void open_message_link(int arg) {
+  int index = arg / MESSAGE_LINKS_MAX, link = arg % MESSAGE_LINKS_MAX;
+  if (index < 0 || index >= nmsgs || msgs[index].kind == K_DELETED) return;
+  static char url[MESSAGE_URL_MAX];
+  if (!message_link_url(msgs[index].text, link, url)) return;
+  // AppUtil is initialized by the system language helper, also with a saved language.
+  i18n_system_lang();
+  SceAppUtilWebBrowserParam param = {0};
+  param.str = url; param.strlen = strlen(url);
+  int ret = sceAppUtilLaunchWebBrowser(&param);
+  crumb("browser: apertura link -> 0x%x", (unsigned)ret);
+  if (ret < 0) toast_set(T("Impossibile aprire il browser"));
 }
 
 // ======================================================================
@@ -1557,7 +1600,7 @@ int main(void) {
             char du[24]; snprintf(du, sizeof du, "%d:%02d", m->dur / 60, m->dur % 60); text((int)cx0 + 50, (int)cy + 26, C_SUB, 13, du);
             btn((int)cx0, (int)cy, m->w - 2 * pad, HVOICE, B_MSG, i + 1000); cy += HVOICE + 2;   // tocco = play/stop
           }
-          for (int k = 0; k < m->nlines; k++) text((int)(bx + pad), (int)(cy + k * LH), m->kind == K_DELETED ? C_SUB : C_TEXT, BFONT, m->lines[k]);
+          draw_message_text(m, i, (int)(bx + pad), (int)cy);
           // ora + spunte
           char tm[16]; fmt_time(m->ts, tm, sizeof tm, 0);
           int overlay = has_media(m) && m->nlines == 0;
@@ -1759,9 +1802,11 @@ int main(void) {
     int id = hit ? hit->id : B_NONE, arg = hit ? hit->arg : 0;
     if (tap || lp) { crumb("%s id=%d arg=%d schermata=%d", lp ? "pressione lunga" : "tocco", id, arg, screen); }
     if (lp) {
+      if (id == B_LINK) { id = B_MSG; arg /= MESSAGE_LINKS_MAX; }
       if (id == B_ROW && screen == S_LIST && arg >= 0 && arg < nchats && !popup_open) sel_toggle(chats[arg].jid);   // pressione lunga su una chat: la seleziona
       if (id == B_MSG && arg < 1000 && arg < nmsgs && !menu_open && !viewer_open && !(cur_chat >= 0 && cur_chat < nchats && chats[cur_chat].channel)) { menu_open = 1; snprintf(menu_id, sizeof menu_id, "%s", msgs[arg].id); }
     } else if (tap) switch (id) {
+      case B_LINK: open_message_link(arg); break;
       case B_ROW: if (nsel > 0 && arg >= 0 && arg < nchats) sel_toggle(chats[arg].jid); else open_chat(arg); break;
       case B_CHIP: filter_sel = arg; list_scroll = 0; break;
       case B_PROFILE: screen = S_PROFILE; break;

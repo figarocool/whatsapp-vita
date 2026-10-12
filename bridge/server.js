@@ -657,7 +657,7 @@ http.createServer(async (req, res) => {
     if (p.startsWith('/avatar/')) {                    // le foto profilo si ricordano: 1 ora quelle trovate, 10 minuti quelle assenti
       const aj = arg('/avatar/'); const hit = avatarCache.get(aj);
       if (hit && Date.now() - hit.ts < (hit.buf ? 3600000 : 600000)) { if (!hit.buf) return json(res, 404, { error: 'no avatar' }); res.writeHead(200, { 'Content-Type': hit.type }); return res.end(hit.buf); }
-      const url = await sock.profilePictureUrl(aj, 'preview').catch(() => null);
+      const url = await Promise.race([sock.profilePictureUrl(aj, 'preview').catch(() => null), new Promise((ok) => setTimeout(() => ok(null), 7000))]);   // se WhatsApp non risponde entro 7 s si lascia perdere (si riprova fra 10 minuti)
       if (!url) { avatarCache.set(aj, { ts: Date.now(), buf: null }); return json(res, 404, { error: 'no avatar' }); }
       const r = await fetch(url); const buf = Buffer.from(await r.arrayBuffer()); const type = r.headers.get('content-type') || 'image/jpeg';
       avatarCache.set(aj, { ts: Date.now(), buf, type }); res.writeHead(200, { 'Content-Type': type }); return res.end(buf);

@@ -29,7 +29,7 @@ Tapping a notification to open the app works on firmware **3.60 and 3.65**. On o
 
 ### If you used an older version (with the PC server)
 
-- Update from inside the app (*Profile → Check for updates*) or install the new VPK by hand.
+- Update from inside the app: after a few seconds it offers the update by itself, or use *Profile → Check for updates*. If you are stuck on the QR screen (there is no Profile there) download `whatsapp-vita.vpk` from the releases and install it by hand with VitaShell.
 - The PC server is **no longer needed**; you can shut it down. The old configuration is ignored.
 - The internal engine has a new session: **scan the QR code again**. The old linked device stays in WhatsApp's list on your phone; you can remove it.
 - The app also updates the notification plugin by itself and asks you to reboot the Vita.

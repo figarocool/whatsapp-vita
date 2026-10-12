@@ -29,7 +29,7 @@ Il popup di notifica che si apre toccandolo funziona con firmware **3.60 e 3.65*
 
 ### Se usavi una versione precedente (con il server sul PC)
 
-- Aggiorna dall'app (*Profilo → Controlla aggiornamenti*) o installa il nuovo VPK a mano.
+- Aggiorna dall'app: dopo qualche secondo propone l'aggiornamento da sola, oppure *Profilo → Controlla aggiornamenti*. Se sei fermo sulla schermata del QR (dove il Profilo non c'è) scarica `whatsapp-vita.vpk` dalle release e installalo a mano con VitaShell.
 - Il server sul PC **non serve più** e puoi spegnerlo. La configurazione vecchia viene ignorata.
 - Il motore interno ha una sessione nuova: **scansiona di nuovo il QR**. Il vecchio dispositivo collegato resta nell'elenco di WhatsApp sul telefono: puoi rimuoverlo.
 - L'app aggiorna da sola anche il plugin delle notifiche e ti chiede di riavviare la Vita.

@@ -25,3 +25,14 @@ engine/js/engine.min.js
 plugin/build2/
 engine/build/
 app/build-motore/
+
+engine/js/*.bundle.js
+engine/js/bridge.min.*
+engine/js/node_modules/
+*.pyc
+__pycache__/
+release-out/
+plugin/build/
+plugin/build2/
+app/build*/
+engine/lite/lite_pc

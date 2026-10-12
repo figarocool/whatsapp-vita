@@ -38,19 +38,35 @@ double strtod(const char *s, char **end) {
   return neg ? -v : v;
 }
 
-// memoria: arena statica. free() non libera niente; il plugin azzera l'arena (arena_reset) a ogni giro, dopo aver liberato il JSON.
-#define ARENA_SZ (96 * 1024)
-static unsigned char arena[ARENA_SZ] __attribute__((aligned(8)));
-static size_t arena_used;
-void arena_reset(void) { arena_used = 0; }
+int memcmp(const void *a, const void *b, size_t n) { const unsigned char *p = a, *q = b; while (n--) { if (*p != *q) return *p - *q; p++; q++; } return 0; }
+char *strcpy(char *d, const char *s) { char *r = d; while ((*d++ = *s++)) {} return r; }
+char *strncpy(char *d, const char *s, size_t n) { size_t i = 0; for (; i < n && s[i]; i++) d[i] = s[i]; for (; i < n; i++) d[i] = 0; return d; }
+int inet_pton(int af, const char *src, void *dst) { (void)af; (void)src; (void)dst; return 0; }
+
+// memoria: un unico blocco (heap_init) gestito con una lista di blocchi; free() libera davvero e unisce i blocchi vicini.
+typedef struct Blk { size_t size; size_t used; } Blk;   // size = byte utili dopo l'intestazione
+static unsigned char *heap_base; static size_t heap_size;
+void heap_init(void *base, size_t size) { heap_base = (unsigned char *)(((size_t)base + 7) & ~(size_t)7); heap_size = (size - (size_t)(heap_base - (unsigned char *)base)) & ~(size_t)7; Blk *b = (Blk *)heap_base; b->size = heap_size - sizeof(Blk); b->used = 0; }
+static Blk *nextb(Blk *b) { unsigned char *n = (unsigned char *)b + sizeof(Blk) + b->size; return n >= heap_base + heap_size ? NULL : (Blk *)n; }
+size_t heap_free_bytes(void) { size_t t = 0; if (!heap_base) return 0; for (Blk *b = (Blk *)heap_base; b; b = nextb(b)) if (!b->used) t += b->size; return t; }
 void *malloc(size_t n) {
-  n = (n + 7) & ~(size_t)7; if (arena_used + n + 8 > ARENA_SZ) return NULL;
-  size_t *h = (size_t *)(arena + arena_used); *h = n; arena_used += n + 8; return (unsigned char *)h + 8;
+  if (!heap_base) return NULL; n = (n + 7) & ~(size_t)7; if (!n) n = 8;
+  for (Blk *b = (Blk *)heap_base; b; b = nextb(b)) {
+    if (b->used) continue;
+    Blk *x; while ((x = nextb(b)) && !x->used) b->size += sizeof(Blk) + x->size;   // unisce i liberi adiacenti
+    if (b->size < n) continue;
+    if (b->size >= n + sizeof(Blk) + 16) { Blk *r = (Blk *)((unsigned char *)b + sizeof(Blk) + n); r->size = b->size - n - sizeof(Blk); r->used = 0; b->size = n; }
+    b->used = 1; return (unsigned char *)b + sizeof(Blk);
+  }
+  return NULL;
 }
+void free(void *p) { if (p) ((Blk *)((unsigned char *)p - sizeof(Blk)))->used = 0; }
 void *calloc(size_t a, size_t b) { void *p = malloc(a * b); if (p) memset(p, 0, a * b); return p; }
-void free(void *p) { (void)p; }
 void *realloc(void *p, size_t n) {
   if (!p) return malloc(n);
-  size_t old = *(size_t *)((unsigned char *)p - 8); if (n <= old) return p;
-  void *q = malloc(n); if (q) memcpy(q, p, old); return q;
+  size_t old = ((Blk *)((unsigned char *)p - sizeof(Blk)))->size; if (n <= old) return p;
+  void *q = malloc(n); if (q) { memcpy(q, p, old); free(p); } return q;
 }
+void *wa_calloc(size_t a, size_t b) { return calloc(a, b); }
+void wa_free(void *p) { free(p); }
+void arena_reset(void) {}

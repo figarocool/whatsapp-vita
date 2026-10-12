@@ -6,13 +6,22 @@ project(wa_notify C)
 include("$ENV{VITASDK}/share/vita.cmake" REQUIRED)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -Wall -std=gnu11")
 
-add_executable(wa_notify src/plugin.c src/mini.c)
+# mbedTLS ridotto (sorgenti: MBED_SRC, versione 3.6.x) compilato con la configurazione plugin/lite/wa_mbed_config.h
+set(MBED_SRC "/tmp/vitaengine/mbedtls-3.6.2" CACHE PATH "sorgenti di mbedTLS 3.6")
+set(MBED_FILES aes gcm cipher cipher_wrap sha256 sha512 md ctr_drbg bignum bignum_core bignum_mod bignum_mod_raw rsa rsa_alt_helpers ecp ecp_curves ecdh oid asn1parse asn1write pk pk_wrap pk_ecc pkparse x509 x509_crt base64 platform platform_util constant_time ssl_tls ssl_tls12_client ssl_client ssl_msg ssl_ciphersuites ssl_debug_helpers_generated error md5 sha1 ripemd160 pem nist_kw ecdsa hmac_drbg)
+set(MBED_SOURCES "")
+foreach(f ${MBED_FILES})
+  list(APPEND MBED_SOURCES ${MBED_SRC}/library/${f}.c)
+endforeach()
+add_executable(wa_notify src/plugin.c src/mini.c src/lite_vita.c ../engine/lite/lite.c ../engine/src/curve25519.c ${MBED_SOURCES})
 set_source_files_properties(src/mini.c PROPERTIES COMPILE_FLAGS "-fno-builtin -fno-tree-loop-distribute-patterns")
-target_include_directories(wa_notify PRIVATE ../app/src)
+target_compile_definitions(wa_notify PRIVATE LITE_PLUGIN C25519_NO_TABLE MBEDTLS_CONFIG_FILE="wa_mbed_config.h")
+target_include_directories(wa_notify PRIVATE ../app/src lite ../engine/lite ../engine/src ${MBED_SRC}/include ${MBED_SRC}/library)
+target_compile_options(wa_notify PRIVATE -Os -ffunction-sections -fdata-sections -fno-builtin -fno-tree-loop-distribute-patterns -w)
 target_link_libraries(wa_notify
   taihen_stub SceSysmodule_stub SceKernelModulemgr_stub
   SceIofilemgr_stub SceKernelThreadMgr_stub SceProcessmgr_stub SceLibKernel_stub gcc)
-set_target_properties(wa_notify PROPERTIES LINK_FLAGS "-nostdlib")
+set_target_properties(wa_notify PROPERTIES LINK_FLAGS "-nostdlib -Wl,--gc-sections -Wl,-u,module_start -Wl,-u,module_stop")
 vita_create_self(wa_notify.suprx wa_notify CONFIG exports.yml UNSAFE)
 
 # plugin di prova a livelli (0..3): vedi src/probe.c

@@ -1250,6 +1250,7 @@ int main(void) {
     UKB = UK = screen_scale(screen);
     #define FC(m) do { if (frame_no <= 2) crumb("frame %u: %s", frame_no, m); } while (0)
     FC("inizio");
+    if (frame_no % 240 == 7) { static char tpl_last[260]; char tpl[260]; snprintf(tpl, sizeof tpl, "%s\n%s\n", T("Nuovo messaggio da %s"), T("Nuovo messaggio da %s in %s")); if (strcmp(tpl, tpl_last)) { SceUID tf = sceIoOpen("ur0:tai/wa_tpl.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (tf >= 0) { sceIoWrite(tf, tpl, strlen(tpl)); sceIoClose(tf); snprintf(tpl_last, sizeof tpl_last, "%s", tpl); } } }   // testi delle notifiche nella lingua dell'app, letti dal plugin
     if (frame_no % 240 == 1) { SceUID hf = sceIoOpen("ur0:tai/wa_active.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777); if (hf >= 0) { sceIoWrite(hf, "1", 1); sceIoClose(hf); } }
     if (strcmp(font_wanted(), font_path_loaded)) { load_fonts(); ui_gen++; crumb("lingua: font cambiato (%s)", font_path_loaded); }
     apply_pending(); remap_cur_chat(); FC("apply_pending ok");

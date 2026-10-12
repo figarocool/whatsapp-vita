@@ -4,6 +4,8 @@
 #include <stddef.h>
 void *wa_calloc(size_t n, size_t s);
 void wa_free(void *p);
+#include <stdio.h>
+#define MBEDTLS_PLATFORM_SNPRINTF_MACRO snprintf
 #define MBEDTLS_PLATFORM_C
 #define MBEDTLS_PLATFORM_MEMORY
 #define MBEDTLS_PLATFORM_NO_STD_FUNCTIONS

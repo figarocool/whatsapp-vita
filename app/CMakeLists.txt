@@ -55,6 +55,8 @@ add_executable(wa_updater helper/updater_helper.c)
 target_compile_options(wa_updater PRIVATE -Wall -O2)
 target_link_libraries(wa_updater mbedcrypto z m SceDisplay_stub SceSysmem_stub SceAppMgr_stub ScePromoterUtil_stub SceSysmodule_stub SceIofilemgr_stub SceLibKernel_stub SceKernelModulemgr_stub SceKernelThreadMgr_stub)
 vita_create_self(wa-updater-eboot.bin wa_updater UNSAFE)
+# plugin incluso nel VPK: quello pubblicato (plugin/build) salvo diversa indicazione (le prove usano -DWA_PLUGIN_FILE=../plugin/build2/wa_notify.suprx)
+set(WA_PLUGIN_FILE "../plugin/build/wa_notify.suprx" CACHE STRING "plugin notifiche incluso nel VPK")
 set(VITA_PACK_VPK_FLAGS "")   # vita_create_vpk accumula i file di una chiamata nella successiva: si azzera ogni volta
 file(GLOB UPDATE_SCREENS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/assets/update-screen-*.z)
 set(UPDATE_SCREEN_FILES "")
@@ -72,7 +74,7 @@ vita_create_vpk(${PROJECT_NAME}.vpk "WHAP00001" ${PROJECT_NAME}.self
   VERSION "01.00" NAME "WhatsApp" ${COMMON_FILES}
   FILE assets/vitashell-head.bin assets/vitashell-head.bin
   FILE ${CMAKE_CURRENT_BINARY_DIR}/wa-updater.vpk assets/wa-updater.vpk
-  FILE ../plugin/build/wa_notify.suprx plugin/wa_notify.suprx)
+  FILE ${WA_PLUGIN_FILE} plugin/wa_notify.suprx)
 add_dependencies(${PROJECT_NAME}.vpk-vpk wa-updater.vpk-vpk)
 
 # versione sicura: si installa senza "unsafe homebrew"; controlla gli aggiornamenti ma non puo' installarli

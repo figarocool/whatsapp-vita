@@ -266,6 +266,37 @@ setInterval(() => saveStore(false), 5000);
 setInterval(() => { if (pendingLid.size) resolveLids(); }, 4000);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { saveStore(true); process.exit(0); });
 
+
+// ---------- file per il plugin delle notifiche (solo dentro la Vita): credenziali del client leggero, nomi delle chat, ultima notifica ----------
+const LITE_DIR = 'ur0:tai/';
+function writeLiteFiles(force) {
+  if (!ENGINE || !sock || !B) return;
+  try {
+    const creds = sock.authState?.creds; if (!creds?.me?.id || !creds.noiseKey) return;
+    if (force || !writeLiteFiles.done) {
+      const cfg = { ...B.DEFAULT_CONNECTION_CONFIG, browser: [process.env.WA_DEVICE_NAME || 'PSVita', 'Chrome', '1.0.0'], syncFullHistory: false, countryCode: 'US' };
+      const node = B.generateLoginNode(creds.me.id, cfg); const payload = Buffer.from(B.proto.ClientPayload.encode(node).finish());
+      const ips = Buffer.from(globalThis.__nat.resolve4('web.whatsapp.com') || []);
+      const me = String(creds.me.id).split(/[:@]/)[0], meb = Buffer.from(me);
+      const head = Buffer.alloc(70); head.write('WAL2', 0); Buffer.from(creds.noiseKey.private).copy(head, 4); Buffer.from(creds.noiseKey.public).copy(head, 36); head.writeUInt16LE(payload.length, 68);
+      const seed = Buffer.from(globalThis.__nat.randomBytes(32));
+      if (ips.length) { fs.writeFileSync(LITE_DIR + 'wa_lite.bin', Buffer.concat([head, payload, Buffer.from([ips.length / 4]), ips, seed, Buffer.from([meb.length]), meb])); writeLiteFiles.done = true; log('plugin: credenziali del client leggero scritte (' + payload.length + ' byte, ' + ips.length / 4 + ' indirizzi)'); }
+    }
+    const lines = []; const seen = new Set();
+    for (const c of [...chats.values()].sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 300)) {
+      const nm = String(c.name || '').replace(/[\t\r\n]+/g, ' ').slice(0, 50), fl = (c.archived || (c.muted && c.muted > Date.now())) ? '1' : '0';
+      for (const j of [c.jid, alias.get(c.jid)]) if (j && !seen.has(j)) { seen.add(j); lines.push(j + '\t' + nm + '\t' + fl); }
+    }
+    let txt = lines.join('\n'); if (Buffer.byteLength(txt) > 22000) txt = txt.slice(0, 22000).replace(/\n[^\n]*$/, '');
+    fs.writeFileSync(LITE_DIR + 'wa_names.txt', txt + '\n');
+  } catch (e) { log('plugin: file non scritti:', e.message); }
+}
+function pluginLastNotif() {   // il plugin scrive il jid della chat dell'ultima notifica; vale 10 minuti
+  if (!ENGINE) return null;
+  try { const st = fs.statSync(LITE_DIR + 'wa_lastnotif.txt'); if (Date.now() - st.mtimeMs > 10 * 60 * 1000) return null; const j = fs.readFileSync(LITE_DIR + 'wa_lastnotif.txt', 'utf8').trim(); return j || null; } catch (_) { return null; }
+}
+setInterval(() => writeLiteFiles(false), 10 * 60 * 1000);
+
 // ---------- connessione ----------
 async function start() {
   const first = !B;
@@ -281,7 +312,7 @@ async function start() {
     if (isNewLogin) { log('nuovo login: parte la prima sincronizzazione'); sync.active = true; sync.progress = 0; sync.t = Date.now(); }
     if (connection) log('connessione:', connection, lastDisconnect?.error?.message || '');
     if (qr) { sync.active = false; state.qr = qr; state.status = 'qr'; console.log('QR pronto: http://localhost:' + PORT + '/qr.png'); }
-    if (connection === 'open') { state.status = 'open'; state.qr = null; state.me = sock.user?.id || null; console.log('Connesso', state.me); sock.fetchBlocklist().then((l) => { blocked.clear(); for (const j of l || []) if (j) blocked.add(B.jidNormalizedUser(j)); }).catch(() => {}); }
+    if (connection === 'open') { state.status = 'open'; state.qr = null; state.me = sock.user?.id || null; console.log('Connesso', state.me); setTimeout(() => writeLiteFiles(true), 3000); sock.fetchBlocklist().then((l) => { blocked.clear(); for (const j of l || []) if (j) blocked.add(B.jidNormalizedUser(j)); }).catch(() => {}); }
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code === DisconnectReason.loggedOut) {
@@ -532,8 +563,10 @@ http.createServer(async (req, res) => {
   const arg = (prefix) => decodeURIComponent(p.slice(prefix.length));
   try {
     if (p === '/lastnotif') {   // chat dell'ultima notifica (valida 10 minuti); con ?take=1 viene consumata
+      const take = new URL(req.url, 'http://x').searchParams.get('take');
+      const pj = pluginLastNotif(); if (pj) { if (take) { try { fs.unlinkSync(LITE_DIR + 'wa_lastnotif.txt'); } catch (_) {} } return json(res, 200, { jid: pj, age: 0 }); }
       const n = lastNotif, ok = n && !n.taken && Date.now() - n.ts < 10 * 60 * 1000;
-      if (ok && new URL(req.url, 'http://x').searchParams.get('take')) n.taken = true;
+      if (ok && take) n.taken = true;
       return json(res, 200, ok ? { jid: n.jid, age: Math.round((Date.now() - n.ts) / 1000) } : { jid: '' });
     }
     if (p === '/debug/call' && /^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress || '')) {   // solo dal PC: simula una voce del registro chiamate

@@ -245,6 +245,12 @@ static JSValue js_audio_to_wav(JSContext *ctx, JSValueConst this_val, int argc, 
 static JSValue js_video_playable(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   size_t n = 0; uint8_t *in = get_bytes(ctx, argv[0], &n); if (!in) return JS_FALSE; return JS_NewBool(ctx, video_mp4_playable(in, n));
 }
+static JSValue js_resolve4(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {   // indirizzi IPv4 di un nome, come 4 byte ciascuno (ordine di rete)
+  const char *h = JS_ToCString(ctx, argv[0]); if (!h) return JS_EXCEPTION; struct addrinfo hints, *res = NULL; memset(&hints, 0, sizeof hints); hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
+  int rc = getaddrinfo(h, "443", &hints, &res); JS_FreeCString(ctx, h); if (rc != 0 || !res) return JS_NULL;
+  uint8_t out[32]; int n = 0; for (struct addrinfo *a = res; a && n < 8; a = a->ai_next) { memcpy(out + n * 4, &((struct sockaddr_in *)a->ai_addr)->sin_addr.s_addr, 4); n++; } freeaddrinfo(res);
+  return new_ab(ctx, out, (size_t)n * 4);
+}
 static JSValue js_mp4_info(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   size_t n = 0; uint8_t *in = get_bytes(ctx, argv[0], &n); Mp4Info mi; if (!in || video_mp4_info(in, n, &mi) != 0) return JS_NULL;
   JSValue o = JS_NewObject(ctx); JS_SetPropertyStr(ctx, o, "codec", JS_NewString(ctx, mi.codec)); JS_SetPropertyStr(ctx, o, "width", JS_NewInt32(ctx, mi.width)); JS_SetPropertyStr(ctx, o, "height", JS_NewInt32(ctx, mi.height)); JS_SetPropertyStr(ctx, o, "profile", JS_NewInt32(ctx, mi.profile)); JS_SetPropertyStr(ctx, o, "level", JS_NewInt32(ctx, mi.level)); return o;
@@ -689,7 +695,7 @@ Engine *eng_new(const char *cacert_path, const char *data_dir, EngineLog log) {
   FN("fsRead", js_fs_read, 1); FN("fsWrite", js_fs_write, 2); FN("fsUnlink", js_fs_unlink, 1); FN("fsMkdir", js_fs_mkdir, 1); FN("fsExists", js_fs_exists, 1); FN("fsList", js_fs_list, 1); FN("fsStat", js_fs_stat, 1); FN("fsRename", js_fs_rename, 2); FN("fsAppend", js_fs_append, 2); FN("fsReadRange", js_fs_read_range, 3);
   JS_SetPropertyStr(ctx, nat, "inflate", JS_NewCFunctionMagic(ctx, (JSCFunctionMagic *)js_zlib, "inflate", 1, JS_CFUNC_generic_magic, 0)); JS_SetPropertyStr(ctx, nat, "deflate", JS_NewCFunctionMagic(ctx, (JSCFunctionMagic *)js_zlib, "deflate", 1, JS_CFUNC_generic_magic, 1));
   FN("curveKeypair", js_curve_keypair, 1); FN("curveShared", js_curve_shared, 2); FN("curveSign", js_curve_sign, 3); FN("curveVerify", js_curve_verify, 3);
-  FN("audioToWav", js_audio_to_wav, 1); FN("videoPlayable", js_video_playable, 1); FN("mp4Info", js_mp4_info, 1); FN("fsCopy", js_fs_copy, 2);
+  FN("audioToWav", js_audio_to_wav, 1); FN("videoPlayable", js_video_playable, 1); FN("mp4Info", js_mp4_info, 1); FN("resolve4", js_resolve4, 1); FN("fsCopy", js_fs_copy, 2);
   FN("imgConvert", js_img_convert, 7); FN("imgInfo", js_img_info, 1);
   FN("crc32", js_crc32, 1); FN("setStatusCache", js_set_status, 1);
   FN("setHandler", js_set_handler, 1); FN("respond", js_respond, 5);

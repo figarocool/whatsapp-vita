@@ -1,6 +1,26 @@
 #include "lite.h"
-#include "../src/curve25519.h"
 #include "wabin_tokens.h"
+#ifdef LITE_PLUGIN
+// Plugin della shell: niente libc, mbedTLS ridotto, rete/tempo/memoria forniti da plat.h
+#include "plat.h"
+#include "wa_root.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "../src/curve25519.h"
+#include "mbedtls/ssl.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/x509_crt.h"
+#include "mbedtls/gcm.h"
+#include "mbedtls/md.h"
+#include "mbedtls/sha256.h"
+#include "mbedtls/base64.h"
+#define psa_crypto_init() 0
+#define LITE_WAIT(c, usec, rd, wr) plat_wait_fd((c)->net.fd, (usec), (rd), (wr))
+#define LITE_NOW() plat_now_ms()
+#define LITE_STRERROR(rc, buf, n) snprintf(buf, n, "codice -0x%x", (unsigned)-(rc))
+#else
+#include "../src/curve25519.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +39,12 @@
 #include "mbedtls/base64.h"
 #include "mbedtls/error.h"
 #include "psa/crypto.h"
+static long long pc_now_ms(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000; }
+static void pc_wait(int fd, int usec, int rd, int wr) { fd_set f; FD_ZERO(&f); FD_SET(fd, &f); struct timeval tv = { 0, usec }; select(fd + 1, rd ? &f : NULL, wr ? &f : NULL, NULL, &tv); }
+#define LITE_WAIT(c, usec, rd, wr) pc_wait((c)->net.fd, (usec), (rd), (wr))
+#define LITE_NOW() pc_now_ms()
+#define LITE_STRERROR(rc, buf, n) mbedtls_strerror(rc, buf, n)
+#endif
 
 struct LiteClient {
   mbedtls_ssl_context ssl; mbedtls_ssl_config conf; mbedtls_net_context net; mbedtls_entropy_context ent; mbedtls_ctr_drbg_context drbg; mbedtls_x509_crt ca; int ca_ok, up;
@@ -29,7 +55,7 @@ struct LiteClient {
   uint8_t hash[32], salt[32], enck[32], deck[32]; uint32_t counter; int sent_intro, transport; uint32_t wr_ctr, rd_ctr; uint8_t t_enc[32], t_dec[32];
   long long last_tx, last_rx; int logged_in; int idc; char err[160];
 };
-static long long now_ms(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000; }
+static long long now_ms(void) { return LITE_NOW(); }
 static int fail(LiteClient *c, int code, const char *m) { snprintf(c->err, sizeof c->err, "%s", m); return code; }
 const char *lite_last_error(LiteClient *c) { return c->err; }
 
@@ -48,7 +74,7 @@ static int hs_encrypt(LiteClient *c, const uint8_t *p, size_t n, uint8_t *out) {
 static int hs_decrypt(LiteClient *c, const uint8_t *ct, size_t n, uint8_t *out) { int rc = gcm(0, c->deck, c->counter++, c->hash, 32, ct, n, out); if (rc == 0) authenticate(c, ct, n); return rc; }
 
 // ---------- TLS + WebSocket ----------
-static int tls_write_all(LiteClient *c, const unsigned char *p, size_t n) { size_t off = 0; long long t0 = now_ms(); while (off < n) { int r = mbedtls_ssl_write(&c->ssl, p + off, n - off); if (r > 0) { off += r; continue; } if (r == MBEDTLS_ERR_SSL_WANT_WRITE || r == MBEDTLS_ERR_SSL_WANT_READ) { if (now_ms() - t0 > 15000) return -1; fd_set fs; FD_ZERO(&fs); FD_SET(c->net.fd, &fs); struct timeval tv = { 0, 50000 }; select(c->net.fd + 1, r == MBEDTLS_ERR_SSL_WANT_READ ? &fs : NULL, r == MBEDTLS_ERR_SSL_WANT_WRITE ? &fs : NULL, NULL, &tv); continue; } return -1; } return 0; }
+static int tls_write_all(LiteClient *c, const unsigned char *p, size_t n) { size_t off = 0; long long t0 = now_ms(); while (off < n) { int r = mbedtls_ssl_write(&c->ssl, p + off, n - off); if (r > 0) { off += r; continue; } if (r == MBEDTLS_ERR_SSL_WANT_WRITE || r == MBEDTLS_ERR_SSL_WANT_READ) { if (now_ms() - t0 > 15000) return -1; LITE_WAIT(c, 50000, r == MBEDTLS_ERR_SSL_WANT_READ, r == MBEDTLS_ERR_SSL_WANT_WRITE); continue; } return -1; } return 0; }
 static int ws_send(LiteClient *c, int op, const uint8_t *d, size_t n) {
   uint8_t *f = malloc(n + 14); size_t h = 0; f[h++] = 0x80 | op; if (n < 126) f[h++] = 0x80 | (uint8_t)n; else if (n < 65536) { f[h++] = 0x80 | 126; f[h++] = n >> 8; f[h++] = n & 255; } else { f[h++] = 0x80 | 127; for (int i = 7; i >= 0; i--) f[h++] = (uint8_t)((unsigned long long)n >> (8 * i)); }
   uint8_t mk[4]; mbedtls_ctr_drbg_random(&c->drbg, mk, 4); memcpy(f + h, mk, 4); h += 4; for (size_t i = 0; i < n; i++) f[h + i] = d[i] ^ mk[i & 3]; int r = tls_write_all(c, f, h + n); free(f); if (r == 0) c->last_tx = now_ms(); return r;
@@ -158,13 +184,17 @@ static int send_iq(LiteClient *c, const char *type, const char *xmlns, const cha
 LiteClient *lite_new(const uint8_t npriv[32], const uint8_t npub[32], const uint8_t *payload, size_t plen, const char *cacert) {
   LiteClient *c = calloc(1, sizeof *c); psa_crypto_init(); mbedtls_ssl_init(&c->ssl); mbedtls_ssl_config_init(&c->conf); mbedtls_net_init(&c->net); mbedtls_entropy_init(&c->ent); mbedtls_ctr_drbg_init(&c->drbg); mbedtls_x509_crt_init(&c->ca);
   mbedtls_ctr_drbg_seed(&c->drbg, mbedtls_entropy_func, &c->ent, (const unsigned char *)"wa-lite", 7); memcpy(c->npriv, npriv, 32); memcpy(c->npub, npub, 32); c->payload = malloc(plen); memcpy(c->payload, payload, plen); c->plen = plen;
+#ifdef LITE_PLUGIN
+  (void)cacert; if (mbedtls_x509_crt_parse_der(&c->ca, WA_ROOT_DER, sizeof WA_ROOT_DER) == 0) c->ca_ok = 1; return c;
+#else
   if (cacert && mbedtls_x509_crt_parse_file(&c->ca, cacert) >= 0) c->ca_ok = 1; return c;
+#endif
 }
 static void reset_conn(LiteClient *c) { if (c->up) { mbedtls_ssl_free(&c->ssl); mbedtls_net_free(&c->net); mbedtls_ssl_init(&c->ssl); mbedtls_net_init(&c->net); } c->up = 0; c->wlen = c->nlen = c->fraglen = 0; c->sent_intro = c->transport = 0; c->wr_ctr = c->rd_ctr = 0; c->logged_in = 0; }
 void lite_close(LiteClient *c) { if (!c) return; if (c->up) { uint8_t cc[2] = { 3, 232 }; ws_send(c, 8, cc, 2); mbedtls_ssl_close_notify(&c->ssl); } reset_conn(c); free(c->wrx); free(c->frag); free(c->nrx); free(c->payload); mbedtls_ssl_config_free(&c->conf); mbedtls_x509_crt_free(&c->ca); mbedtls_ctr_drbg_free(&c->drbg); mbedtls_entropy_free(&c->ent); free(c); }
 static int wait_ws(LiteClient *c, uint8_t **msg, size_t *mn, int timeout_ms) {   // attende il prossimo messaggio WebSocket
   long long t0 = now_ms();
-  for (;;) { int r = ws_next(c, msg, mn); if (r != 0) return r; int f = ws_fill(c); if (f < 0) return -1; if (f == 0) { if (now_ms() - t0 > timeout_ms) return 0; fd_set rs; FD_ZERO(&rs); FD_SET(c->net.fd, &rs); struct timeval tv = { 0, 100000 }; if (mbedtls_ssl_get_bytes_avail(&c->ssl) == 0) select(c->net.fd + 1, &rs, NULL, NULL, &tv); } }
+  for (;;) { int r = ws_next(c, msg, mn); if (r != 0) return r; int f = ws_fill(c); if (f < 0) return -1; if (f == 0) { if (now_ms() - t0 > timeout_ms) return 0; if (mbedtls_ssl_get_bytes_avail(&c->ssl) == 0) LITE_WAIT(c, 100000, 1, 0); } }
 }
 int lite_connect(LiteClient *c) {
   reset_conn(c); int rc; char eb[120];
@@ -173,7 +203,7 @@ int lite_connect(LiteClient *c) {
   mbedtls_ssl_config_defaults(&c->conf, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT); mbedtls_ssl_conf_rng(&c->conf, mbedtls_ctr_drbg_random, &c->drbg); mbedtls_ssl_conf_max_tls_version(&c->conf, MBEDTLS_SSL_VERSION_TLS1_2);
   if (c->ca_ok) { mbedtls_ssl_conf_ca_chain(&c->conf, &c->ca, NULL); mbedtls_ssl_conf_authmode(&c->conf, MBEDTLS_SSL_VERIFY_REQUIRED); } else mbedtls_ssl_conf_authmode(&c->conf, MBEDTLS_SSL_VERIFY_NONE);
   mbedtls_ssl_conf_read_timeout(&c->conf, 15000); mbedtls_ssl_setup(&c->ssl, &c->conf); mbedtls_ssl_set_hostname(&c->ssl, "web.whatsapp.com"); mbedtls_ssl_set_bio(&c->ssl, &c->net, mbedtls_net_send, mbedtls_net_recv, mbedtls_net_recv_timeout);
-  while ((rc = mbedtls_ssl_handshake(&c->ssl)) != 0) if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE) { mbedtls_strerror(rc, eb, sizeof eb); snprintf(c->err, sizeof c->err, "TLS: %s", eb); return LITE_ERR_TLS; }
+  while ((rc = mbedtls_ssl_handshake(&c->ssl)) != 0) if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE) { LITE_STRERROR(rc, eb, sizeof eb); snprintf(c->err, sizeof c->err, "TLS: %s", eb); return LITE_ERR_TLS; }
   uint8_t kr[16]; char key[32]; size_t kl; mbedtls_ctr_drbg_random(&c->drbg, kr, 16); mbedtls_base64_encode((unsigned char *)key, sizeof key, &kl, kr, 16); key[kl] = 0;
   char req[512]; int n = snprintf(req, sizeof req, "GET /ws/chat HTTP/1.1\r\nHost: web.whatsapp.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nOrigin: https://web.whatsapp.com\r\n\r\n", key);
   if (tls_write_all(c, (unsigned char *)req, n) != 0) return fail(c, LITE_ERR_WS, "invio upgrade");
@@ -225,6 +255,6 @@ int lite_poll(LiteClient *c, int timeout_ms, LiteOnNode cb, void *ud) {
     if (now - c->last_rx > 90000) return LITE_CLOSED;
     if (now - t0 >= timeout_ms) return LITE_OK;
     int f = ws_fill(c); if (f < 0) return LITE_CLOSED;
-    if (f == 0) { fd_set rs; FD_ZERO(&rs); FD_SET(c->net.fd, &rs); struct timeval tv = { 0, 100000 }; if (mbedtls_ssl_get_bytes_avail(&c->ssl) == 0) select(c->net.fd + 1, &rs, NULL, NULL, &tv); }
+    if (f == 0) { if (mbedtls_ssl_get_bytes_avail(&c->ssl) == 0) LITE_WAIT(c, 100000, 1, 0); }
   }
 }

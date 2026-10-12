@@ -820,7 +820,7 @@ static const char *const WB_DICT2[256] = {
   "75",
   "failure",
   "ptt_oot_playback",
-  "AIzaSyDR5yfaG7OG8sMTUj8kfQEb8T9pN8BM6Lk",
+  "(chiave-pubblica-del-protocollo)",
   "w",
   "048",
   "2201",
